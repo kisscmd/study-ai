@@ -9,12 +9,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
-
-<!-- KaTeX -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous" onerror="window.__katexFailed = true"></script>
-
-<!-- PWA -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#6366F1">
 </head>
@@ -40,15 +36,13 @@
 </header>
 
 <main class="content" id="content">
-
-  <!-- ЭКРАН 1: КАМЕРА -->
   <section class="screen" id="screen-home" aria-labelledby="h-home">
     <h1 id="h-home">Новая задача</h1>
     <div class="stack">
       <div class="zone" id="home-dropzone">
         <div class="zone-inner">
           <p class="zone-title">Добавьте фото задач</p>
-          <p class="zone-hint">До 20 фото: страницы учебника или несколько задач. Фото не покидают устройство.</p>
+          <p class="zone-hint">До 20 фото: страницы учебника или несколько задач.</p>
           <div class="zone-actions">
             <button class="btn btn-primary" type="button" id="btn-camera">Камера</button>
             <button class="btn btn-secondary" type="button" id="btn-upload">Загрузить</button>
@@ -59,20 +53,13 @@
       <input class="visually-hidden" type="file" id="input-upload" accept="image/*" multiple tabindex="-1" aria-hidden="true">
       <div class="progress" id="home-progress" hidden><div class="progress-bar" id="progress-bar"></div></div>
       <p class="status" id="home-status" role="status" hidden></p>
-      <div class="meta-row" id="home-meta" hidden>
-        <span class="photo-summary" id="photo-summary"></span>
-        <button class="btn btn-ghost" type="button" id="btn-clear">Очистить</button>
-      </div>
-      <ul class="grid-previews" id="home-previews" aria-label="Загруженные фото"></ul>
-      <button class="btn btn-primary btn-block" type="button" id="btn-recognize" hidden>Распознать текст</button>
     </div>
   </section>
 
-  <!-- ЭКРАН 2: ОБРЕЗКА (ВОТ ЕГО НЕ БЫЛО!) -->
+  <!-- ЭКРАН ОБРЕЗКИ (ОБЯЗАТЕЛЬНО ДОЛЖЕН БЫТЬ) -->
   <section class="screen" id="screen-crop" aria-labelledby="h-crop">
     <h1 id="h-crop">Обрезка</h1>
     <p style="color:var(--muted); font-size:14px; margin-top:0;">Оставьте в рамке только текст задачи.</p>
-    
     <div class="crop-container" id="crop-container">
       <img class="crop-image" id="crop-image">
       <div class="crop-box" id="crop-box" style="width: 80%; height: 30%; top: 35%; left: 10%;">
@@ -83,14 +70,12 @@
         <div class="handle handle-br" data-dir="br"></div>
       </div>
     </div>
-
     <div class="footer-action actions-row">
       <button class="btn btn-secondary" type="button" id="btn-crop-cancel">Отмена</button>
       <button class="btn btn-primary" type="button" id="btn-crop-apply">Распознать</button>
     </div>
   </section>
 
-  <!-- ЭКРАН 3: ПРОВЕРКА ТЕКСТА -->
   <section class="screen" id="screen-ocr-review" aria-labelledby="h-ocr">
     <h1 id="h-ocr">Проверка текста</h1>
     <div class="stack">
@@ -111,7 +96,6 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 4: РЕШЕНИЕ -->
   <section class="screen" id="screen-solution" aria-labelledby="h-sol">
     <h1 id="h-sol">Решение</h1>
     <div class="stack">
@@ -123,7 +107,6 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 5: ИСТОРИЯ -->
   <section class="screen" id="screen-history" aria-labelledby="h-history">
     <h1 id="h-history">История</h1>
     <div class="stack" id="history-list"></div>
@@ -132,7 +115,6 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 6: НАСТРОЙКИ -->
   <section class="screen" id="screen-settings" aria-labelledby="h-settings">
     <h1 id="h-settings">Настройки</h1>
     <div class="stack">
@@ -146,12 +128,11 @@
       </div>
       <div class="card">
         <h3 style="margin-top:0; margin-bottom: 12px; font-size: 16px;">Данные приложения</h3>
-        <p class="status" style="margin-bottom: 12px;">Удалить всю историю и настройки. Приложение перезагрузится.</p>
+        <p class="status" style="margin-bottom: 12px;">Удалить всю историю и настройки.</p>
         <button class="btn btn-primary" style="background: var(--error); border-color: var(--error); width: 100%;" type="button" id="btn-reset-data">Сбросить все данные</button>
       </div>
     </div>
   </section>
-
 </main>
 
 <nav class="bottom-nav" aria-label="Основная навигация">
@@ -169,6 +150,6 @@
     navigator.serviceWorker.register('sw.js').catch(function () { });
   }
 </script>
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>
