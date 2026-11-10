@@ -927,6 +927,19 @@
     return n;
   }
 
+  // Превращает текст Nerdamer в красивый LaTeX
+  function latexify(str) {
+    if (!str) return '';
+    var s = String(str);
+    s = s.replace(/(\d)\*([a-zA-Z])/g, '$1$2'); // 20*x -> 20x
+    s = s.replace(/\*/g, ' \\cdot ');           // остальные * -> ·
+    s = s.replace(/sqrt\(([^()]*)\)/g, '\\sqrt{$1}'); // sqrt(5) -> √5
+    s = s.replace(/\bpi\b/g, '\\pi');           // pi -> π
+    s = s.replace(/\blog\(/g, '\\ln(');         // log -> ln
+    s = s.replace(/≈/g, '\\approx');
+    return s;
+  }
+
   function renderSolutions() {
     var ok = solutions.filter(function (s) { return s.status === 'ok'; }).length;
     var head = $('solution-task');
@@ -940,7 +953,27 @@
       var box = el('div', 'answer-box' + (s.status === 'fail' ? ' err' : (s.status === 'stub' ? ' stub' : '')));
       if (s.status === 'ok') {
         box.appendChild(el('div', 'answer-label', 'Ответ'));
-        box.appendChild(el('div', 'answer', s.answer));
+        var ansEl = el('div', 'answer');
+        
+        // Если в ответе есть русские буквы (например "Действительных решений нет"), пишем текстом
+        if (/[а-яА-Я]/.test(s.answer)) {
+          ansEl.textContent = s.answer;
+        } else {
+          try {
+            // Разбиваем ответы через ; (например "x = 2; x = 3") и рисуем каждый на новой строке
+            var parts = s.answer.split(';');
+            parts.forEach(function(p, i) {
+              if (i > 0) ansEl.appendChild(document.createElement('br'));
+              var span = document.createElement('span');
+              katex.render(latexify(p.trim()), span, { displayMode: true, throwOnError: false });
+              ansEl.appendChild(span);
+            });
+          } catch (e) {
+            ansEl.textContent = s.answer; // если KaTeX сломался, показываем как было
+          }
+        }
+        
+        box.appendChild(ansEl);
         if (s.note) box.appendChild(el('div', 'answer-note', s.note));
       } else {
         box.appendChild(el('div', 'answer', s.message));
