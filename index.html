@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Study AI</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,11 +14,9 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous" onerror="window.__katexFailed = true"></script>
 
-<!-- PWA НАЧАЛО -->
+<!-- PWA -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#6366F1">
-<!-- PWA КОНЕЦ -->
-
 </head>
 <body>
 
@@ -70,7 +68,29 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 2: ПРОВЕРКА ТЕКСТА -->
+  <!-- ЭКРАН 2: ОБРЕЗКА (ВОТ ЕГО НЕ БЫЛО!) -->
+  <section class="screen" id="screen-crop" aria-labelledby="h-crop">
+    <h1 id="h-crop">Обрезка</h1>
+    <p style="color:var(--muted); font-size:14px; margin-top:0;">Оставьте в рамке только текст задачи.</p>
+    
+    <div class="crop-container" id="crop-container">
+      <img class="crop-image" id="crop-image">
+      <div class="crop-box" id="crop-box" style="width: 80%; height: 30%; top: 35%; left: 10%;">
+        <div class="crop-grid"></div>
+        <div class="handle handle-tl" data-dir="tl"></div>
+        <div class="handle handle-tr" data-dir="tr"></div>
+        <div class="handle handle-bl" data-dir="bl"></div>
+        <div class="handle handle-br" data-dir="br"></div>
+      </div>
+    </div>
+
+    <div class="footer-action actions-row">
+      <button class="btn btn-secondary" type="button" id="btn-crop-cancel">Отмена</button>
+      <button class="btn btn-primary" type="button" id="btn-crop-apply">Распознать</button>
+    </div>
+  </section>
+
+  <!-- ЭКРАН 3: ПРОВЕРКА ТЕКСТА -->
   <section class="screen" id="screen-ocr-review" aria-labelledby="h-ocr">
     <h1 id="h-ocr">Проверка текста</h1>
     <div class="stack">
@@ -91,7 +111,7 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 3: РЕШЕНИЕ -->
+  <!-- ЭКРАН 4: РЕШЕНИЕ -->
   <section class="screen" id="screen-solution" aria-labelledby="h-sol">
     <h1 id="h-sol">Решение</h1>
     <div class="stack">
@@ -103,7 +123,7 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 4: ИСТОРИЯ -->
+  <!-- ЭКРАН 5: ИСТОРИЯ -->
   <section class="screen" id="screen-history" aria-labelledby="h-history">
     <h1 id="h-history">История</h1>
     <div class="stack" id="history-list"></div>
@@ -112,7 +132,7 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 5: НАСТРОЙКИ -->
+  <!-- ЭКРАН 6: НАСТРОЙКИ -->
   <section class="screen" id="screen-settings" aria-labelledby="h-settings">
     <h1 id="h-settings">Настройки</h1>
     <div class="stack">
@@ -144,14 +164,11 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<!-- PWA НАЧАЛО -->
 <script>
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(function () { /* без service worker приложение работает как обычно */ });
+    navigator.serviceWorker.register('sw.js').catch(function () { });
   }
 </script>
-<!-- PWA КОНЕЦ -->
-
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>
