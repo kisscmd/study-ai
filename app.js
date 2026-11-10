@@ -16,8 +16,11 @@
   applyTheme(localStorage.getItem('study_ai_theme') || 'system');
 
   var SCREENS = {
-    'home': 'screen-home', 'ocr-review': 'screen-ocr-review', 'solution': 'screen-solution',
-    'history': 'screen-history', 'settings': 'screen-settings'
+    'home': 'screen-home',
+    'ocr-review': 'screen-ocr-review',
+    'solution': 'screen-solution',
+    'history': 'screen-history',
+    'settings': 'screen-settings'
   };
   var current = 'home';
   var toastTimer = null;
@@ -876,11 +879,9 @@
     s = s.replace(/\s*[·*]\s*/g, ' \\cdot ');
     return s.replace(/\s+/g, ' ').trim();
   }
-
   function prettyText(str) {
     return String(str).replace(/([A-Za-z0-9.)])\s*·\s*(?=[A-Za-z(])/g, '$1');
   }
-
   function typesetAnswers() {
     if (typeof katex === 'undefined' || typeof katex.render !== 'function') return false;
     if (!katexStyled) {
@@ -903,13 +904,10 @@
         node.textContent = '';
         node.appendChild(frag);
         node.dataset.typeset = '1';
-      } catch (e) {
-        console.error('KaTeX не смог отрисовать «' + raw + '»:', e);   
-      }
+      } catch (e) { }
     });
     return true;
   }
-
   function loadKatexFallback() {   
     if (katexFallbackTried) return;
     katexFallbackTried = true;
@@ -919,12 +917,9 @@
     var sc = document.createElement('script');
     sc.src = KATEX_JS_FALLBACK;
     sc.onload = function () { typesetAnswers(); };
-    sc.onerror = function () {
-      console.warn('KaTeX недоступен ни на одном CDN. Положите katex.min.js, katex.min.css и папку fonts рядом с index.html.');
-    };
+    sc.onerror = function () { };
     document.head.appendChild(sc);
   }
-
   function waitForKatex() {   
     if (katexWait) return;
     var tries = 0;
@@ -932,10 +927,9 @@
       tries++;
       if (typesetAnswers()) { clearInterval(katexWait); katexWait = null; return; }
       if (window.__katexFailed || tries === 6) loadKatexFallback();   
-      if (tries > 80) { clearInterval(katexWait); katexWait = null; console.warn('KaTeX так и не загрузился — ответы показаны текстом.'); }
+      if (tries > 80) { clearInterval(katexWait); katexWait = null; }
     }, 500);
   }
-
   function renderSolutions() {
     var ok = solutions.filter(function (s) { return s.status === 'ok'; }).length;
     var head = $('solution-task');
@@ -1249,7 +1243,6 @@
     }
     return steps;
   }
-
   function generateSteps(taskText, finalAnswer) {
     try {
       var text = String(taskText), ch = parseChoices(text), base = ch ? ch.stem : text;
