@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Study AI</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,9 +14,11 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous" onerror="window.__katexFailed = true"></script>
 
-<!-- PWA -->
+<!-- PWA НАЧАЛО -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#6366F1">
+<!-- PWA КОНЕЦ -->
+
 </head>
 <body>
 
@@ -25,7 +27,6 @@
   <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/><path d="M10 11v6M14 11v6"/></symbol>
-  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></symbol>
 </svg>
 
 <header class="topbar">
@@ -42,66 +43,34 @@
 
 <main class="content" id="content">
 
-  <!-- ЭКРАН 1: ГЛАВНАЯ -->
+  <!-- ЭКРАН 1: КАМЕРА -->
   <section class="screen" id="screen-home" aria-labelledby="h-home">
     <h1 id="h-home">Новая задача</h1>
-    <div class="main-card">
-      <p class="card-title">Добавьте фото задач</p>
-      <p class="card-desc">До 20 фото: страницы учебника или несколько задач.</p>
-      
-      <div class="btn-group">
-        <button class="btn btn-primary" type="button" id="btn-camera">Камера</button>
-        <button class="btn btn-secondary" type="button" id="btn-upload">Загрузить</button>
-      </div>
-
-      <div class="divider">или</div>
-
-      <button class="btn btn-secondary" style="width:100%;" type="button" id="btn-manual-toggle">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-edit"/></svg>
-        Написать вручную
-      </button>
-
-      <div class="manual-input-area" id="manual-area">
-        <div class="input-wrapper">
-          <textarea class="manual-textarea" id="math-input" placeholder="Например: 2x + 5 = 15"></textarea>
-          <button class="btn-calc" type="button" id="btn-show-math" title="Математические символы">
-            <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 12h-4v4h-2v-4H7v-2h4V9h2v4h4v2z"/></svg>
-          </button>
+    <div class="stack">
+      <div class="zone" id="home-dropzone">
+        <div class="zone-inner">
+          <p class="zone-title">Добавьте фото задач</p>
+          <p class="zone-hint">До 20 фото: страницы учебника или несколько задач. Фото не покидают устройство.</p>
+          <div class="zone-actions">
+            <button class="btn btn-primary" type="button" id="btn-camera">Камера</button>
+            <button class="btn btn-secondary" type="button" id="btn-upload">Загрузить</button>
+          </div>
         </div>
-        <button class="btn btn-primary" style="width:100%; margin-top:12px;" type="button" id="btn-solve-manual">Решить задачу</button>
       </div>
-    </div>
-    
-    <input type="file" id="input-camera" accept="image/*" capture="environment" hidden>
-    <input type="file" id="input-upload" accept="image/*" multiple hidden>
-    
-    <div class="progress" id="home-progress" hidden><div class="progress-bar" id="progress-bar"></div></div>
-    <p class="status" id="home-status" role="status" hidden></p>
-  </section>
-
-  <!-- ЭКРАН 2: ОБРЕЗКА -->
-  <section class="screen" id="screen-crop" aria-labelledby="h-crop">
-    <h1 id="h-crop">Обрезка</h1>
-    <p style="color:var(--muted); font-size:14px; margin-top:0;">Оставьте в рамке только текст задачи.</p>
-    
-    <div class="crop-container" id="crop-container">
-      <img class="crop-image" id="crop-image">
-      <div class="crop-box" id="crop-box" style="width: 80%; height: 30%; top: 35%; left: 10%;">
-        <div class="crop-grid"></div>
-        <div class="handle handle-tl" data-dir="tl"></div>
-        <div class="handle handle-tr" data-dir="tr"></div>
-        <div class="handle handle-bl" data-dir="bl"></div>
-        <div class="handle handle-br" data-dir="br"></div>
+      <input class="visually-hidden" type="file" id="input-camera" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true">
+      <input class="visually-hidden" type="file" id="input-upload" accept="image/*" multiple tabindex="-1" aria-hidden="true">
+      <div class="progress" id="home-progress" hidden><div class="progress-bar" id="progress-bar"></div></div>
+      <p class="status" id="home-status" role="status" hidden></p>
+      <div class="meta-row" id="home-meta" hidden>
+        <span class="photo-summary" id="photo-summary"></span>
+        <button class="btn btn-ghost" type="button" id="btn-clear">Очистить</button>
       </div>
-    </div>
-
-    <div class="footer-action actions-row">
-      <button class="btn btn-secondary" type="button" id="btn-crop-cancel">Отмена</button>
-      <button class="btn btn-primary" type="button" id="btn-crop-apply">Распознать</button>
+      <ul class="grid-previews" id="home-previews" aria-label="Загруженные фото"></ul>
+      <button class="btn btn-primary btn-block" type="button" id="btn-recognize" hidden>Распознать текст</button>
     </div>
   </section>
 
-  <!-- ЭКРАН 3: ПРОВЕРКА ТЕКСТА (OCR) -->
+  <!-- ЭКРАН 2: ПРОВЕРКА ТЕКСТА -->
   <section class="screen" id="screen-ocr-review" aria-labelledby="h-ocr">
     <h1 id="h-ocr">Проверка текста</h1>
     <div class="stack">
@@ -122,7 +91,7 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 4: РЕШЕНИЕ -->
+  <!-- ЭКРАН 3: РЕШЕНИЕ -->
   <section class="screen" id="screen-solution" aria-labelledby="h-sol">
     <h1 id="h-sol">Решение</h1>
     <div class="stack">
@@ -134,7 +103,7 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 5: ИСТОРИЯ -->
+  <!-- ЭКРАН 4: ИСТОРИЯ -->
   <section class="screen" id="screen-history" aria-labelledby="h-history">
     <h1 id="h-history">История</h1>
     <div class="stack" id="history-list"></div>
@@ -143,7 +112,7 @@
     </div>
   </section>
 
-  <!-- ЭКРАН 6: НАСТРОЙКИ -->
+  <!-- ЭКРАН 5: НАСТРОЙКИ -->
   <section class="screen" id="screen-settings" aria-labelledby="h-settings">
     <h1 id="h-settings">Настройки</h1>
     <div class="stack">
@@ -157,7 +126,7 @@
       </div>
       <div class="card">
         <h3 style="margin-top:0; margin-bottom: 12px; font-size: 16px;">Данные приложения</h3>
-        <p class="status" style="margin-bottom: 12px;">Удалить всю историю и настройки.</p>
+        <p class="status" style="margin-bottom: 12px;">Удалить всю историю и настройки. Приложение перезагрузится.</p>
         <button class="btn btn-primary" style="background: var(--error); border-color: var(--error); width: 100%;" type="button" id="btn-reset-data">Сбросить все данные</button>
       </div>
     </div>
@@ -173,52 +142,16 @@
   </div>
 </nav>
 
-<!-- МАТЕМАТИЧЕСКАЯ КЛАВИАТУРА -->
-<div class="math-keyboard" id="math-keyboard">
-  <div class="kb-header">
-    <span class="kb-title">Математические символы</span>
-    <button class="kb-close" type="button" id="btn-hide-math">Скрыть ✕</button>
-  </div>
-  <div class="keys">
-    <button class="key key-op" data-key="+">+</button>
-    <button class="key key-op" data-key="-">-</button>
-    <button class="key key-op" data-key="*">×</button>
-    <button class="key key-op" data-key="/">÷</button>
-    <button class="key key-op" data-key="=">=</button>
-
-    <button class="key" data-key="x">x</button>
-    <button class="key" data-key="y">y</button>
-    <button class="key" data-key="7">7</button>
-    <button class="key" data-key="8">8</button>
-    <button class="key" data-key="9">9</button>
-
-    <button class="key" data-key="^2">x²</button>
-    <button class="key" data-key="^3">x³</button>
-    <button class="key" data-key="4">4</button>
-    <button class="key" data-key="5">5</button>
-    <button class="key" data-key="6">6</button>
-
-    <button class="key" data-key="sqrt(">√</button>
-    <button class="key" data-key="pi">π</button>
-    <button class="key" data-key="1">1</button>
-    <button class="key" data-key="2">2</button>
-    <button class="key" data-key="3">3</button>
-
-    <button class="key" data-key="sin(">sin</button>
-    <button class="key" data-key="cos(">cos</button>
-    <button class="key" data-key="0">0</button>
-    <button class="key" data-key=".">.</button>
-    <button class="key key-op" data-key=")">)</button>
-  </div>
-</div>
-
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<!-- PWA НАЧАЛО -->
 <script>
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(function () { });
+    navigator.serviceWorker.register('sw.js').catch(function () { /* без service worker приложение работает как обычно */ });
   }
 </script>
+<!-- PWA КОНЕЦ -->
+
 <script src="app.js"></script>
 </body>
 </html>
