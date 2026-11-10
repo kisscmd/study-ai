@@ -53,7 +53,7 @@
 
   /* ================= E2: Input Layer ================= */
   var MAX_PHOTOS = 20, MAX_SIDE = 1600, QUALITY = 0.85, HOLD_MS = 250;
-  var photos = [];          // [{id, blob, url}] — Blob в памяти, не base64
+  var photos = [];          
   var nextId = 1, busy = false;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -89,7 +89,7 @@
     ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
     if (src.close) src.close();
     var blob = await new Promise(function (res) { canvas.toBlob(res, 'image/jpeg', QUALITY); });
-    canvas.width = canvas.height = 0;   // освободить память на iOS
+    canvas.width = canvas.height = 0;   
     if (!blob) throw new Error('encode');
     return blob;
   }
@@ -153,7 +153,7 @@
     }
     busy = true; render();
     var failed = 0;
-    for (var i = 0; i < files.length; i++) {      // по очереди: на iPhone мало памяти
+    for (var i = 0; i < files.length; i++) {      
       setProgress(i, files.length);
       try {
         var blob = await compress(files[i]);
@@ -198,7 +198,6 @@
   });
   $('btn-clear').addEventListener('click', clearPhotos);
 
-  // Drag & drop файлов — только десктоп
   ['dragover', 'drop'].forEach(function (t) {
     window.addEventListener(t, function (e) { e.preventDefault(); });
   });
@@ -209,13 +208,11 @@
     if (e.dataTransfer && e.dataTransfer.files) addFiles(Array.prototype.slice.call(e.dataTransfer.files));
   });
 
-  // Удаление (делегирование)
   grid.addEventListener('click', function (e) {
     var del = e.target.closest('.tile-del');
     if (del) removePhoto(del.closest('.tile').dataset.id);
   });
 
-  // Порядок: долгое нажатие (250мс) на плитке, затем перетаскивание пальцем
   var drag = null, holdTimer = null;
 
   function tileAt(x, y, except) {
@@ -266,7 +263,7 @@
     if (!drag) return;
     var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     if (!drag.active) {
-      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) endDrag(false);   // это скролл
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) endDrag(false);   
       return;
     }
     drag.tile.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.04)';
@@ -277,19 +274,18 @@
   grid.addEventListener('pointerup', function (e) { endDrag(true, e.clientX, e.clientY); });
   grid.addEventListener('pointercancel', function () { endDrag(false); });
   document.addEventListener('touchmove', function (e) {
-    if (drag && drag.active && e.cancelable) e.preventDefault();   // не скроллить при перетаскивании
+    if (drag && drag.active && e.cancelable) e.preventDefault();   
   }, { passive: false });
   grid.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
   /* ================= E3: OCR Layer + экран проверки ================= */
   var TESS_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
-  var OCR_LANG = 'rus+eng';       // в E6 — из настроек
+  var OCR_LANG = 'rus+eng';       
   var LOW_CONF = 0.7;
-  var state = 'IDLE';             // IDLE → PHOTOS_ADDED → OCR_PROCESSING → OCR_REVIEW → SOLVING → SOLUTION_SHOWN
+  var state = 'IDLE';             
   var worker = null, ocrLogger = null, reviewIdx = 0, ocrFailed = false;
 
-  /*E3-PURE-START*/
-  function binarize(gray, w, h) {   // Otsu binarization, +5-15% точности OCR; затем медианный фильтр 3×3
+  function binarize(gray, w, h) {   
     var hist = new Uint32Array(256), n = w * h, i, t, x, y;
     for (i = 0; i < n; i++) hist[gray[i] | 0]++;
     var sumAll = 0;
@@ -305,8 +301,8 @@
       if (between > best) { best = between; thr = t; }
     }
     var bin = new Uint8Array(n);
-    for (i = 0; i < n; i++) bin[i] = gray[i] > thr ? 0 : 1;   // gray > порог → белый, иначе тёмный (1)
-    var med = new Uint8Array(n);                                // медиана 3×3 по бинарной карте
+    for (i = 0; i < n; i++) bin[i] = gray[i] > thr ? 0 : 1;   
+    var med = new Uint8Array(n);                                
     for (y = 0; y < h; y++) {
       var ya = Math.max(0, y - 1), yb = Math.min(h - 1, y + 1);
       for (x = 0; x < w; x++) {
@@ -315,10 +311,10 @@
         med[y * w + x] = c * 2 > tot ? 1 : 0;
       }
     }
-    return { bin: bin, med: med };   // bin — для поиска тонких черт дробей, med — для картинки Tesseract
+    return { bin: bin, med: med };   
   }
 
-  function findBars(dark, w, h) {   // горизонтальные тонкие чёрточки = кандидаты в черты дробей
+  function findBars(dark, w, h) {   
     var minLen = Math.max(24, Math.round(w * 0.02)), maxThick = Math.max(4, Math.round(h * 0.01));
     var open = [], done = [], y, x;
     for (y = 0; y < h; y++) {
@@ -355,7 +351,6 @@
     return out;
   }
 
-  // Пересборка текста по координатам слов: стопки «числитель / черта / знаменатель» → (числитель)/(знаменатель)
   function buildText(rawWords, bars) {
     var ws = rawWords.filter(function (w) { return w && w.bbox && String(w.text || '').trim(); }).map(function (w) {
       return { t: String(w.text).trim(), x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1, used: false };
@@ -379,10 +374,10 @@
       var mx0 = Math.min.apply(null, all.map(function (w) { return w.x0; }));
       var mx1 = Math.max.apply(null, all.map(function (w) { return w.x1; }));
       var tw = mx1 - mx0, bw = bar.x1 - bar.x0;
-      if (bw > tw * 1.35 + 20 || bw < tw * 0.55) return;   // не дробь (линейка, рамка, минус)
+      if (bw > tw * 1.35 + 20 || bw < tw * 0.55) return;   
       up.sort(byX); dn.sort(byX);
       all.forEach(function (w) { w.used = true; });
-      ws.forEach(function (w) {   // чёрту Tesseract мог прочитать как «—», «_»
+      ws.forEach(function (w) {   
         if (!w.used && /^[-—–_=~.|]+$/.test(w.t) && Math.abs(w.cy - bc) <= medH * 0.6 && w.cx >= bar.x0 - 4 && w.cx <= bar.x1 + 4) w.used = true;
       });
       fracs.push({
@@ -404,9 +399,8 @@
     });
     return { text: text, fracs: fracs.length };
   }
-  /*E3-PURE-END*/
 
-  async function preprocess(blob) {   // увеличение мелких снимков + адаптивная бинаризация
+  async function preprocess(blob) {   
     var bmp = await createImageBitmap(blob);
     var k = Math.min(3, Math.max(1, 1800 / Math.max(bmp.width, bmp.height)));
     var w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
@@ -419,7 +413,7 @@
     if (bmp.close) bmp.close();
     var img = ctx.getImageData(0, 0, w, h), d = img.data, n = w * h, gray = new Uint8ClampedArray(n), sum = 0, i;
     for (i = 0; i < n; i++) { var g = (d[4 * i] * 299 + d[4 * i + 1] * 587 + d[4 * i + 2] * 114) / 1000; gray[i] = g; sum += g; }
-    if (sum / n < 110) for (i = 0; i < n; i++) gray[i] = 255 - gray[i];   // тёмная тема: светлый текст на тёмном
+    if (sum / n < 110) for (i = 0; i < n; i++) gray[i] = 255 - gray[i];   
     var bz = binarize(gray, w, h), dark = bz.bin;
     for (i = 0; i < n; i++) { var v = bz.med[i] ? 0 : 255; d[4 * i] = d[4 * i + 1] = d[4 * i + 2] = v; d[4 * i + 3] = 255; }
     ctx.putImageData(img, 0, 0);
@@ -444,7 +438,7 @@
   async function killWorker() {
     if (!worker) return;
     try { await worker.terminate(); } catch (e) { /* ignore */ }
-    worker = null;                // освобождаем память iPhone до следующих этапов
+    worker = null;                
   }
 
   function ocrProgress(frac, text, loading) {
@@ -470,7 +464,6 @@
         }
       };
       
-      // ИСПРАВЛЕНО: Жестко прописаны пути для Tesseract, чтобы не было AbortError
       worker = await Tesseract.createWorker(OCR_LANG, 1, {
         workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
         corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
@@ -491,7 +484,7 @@
     }
 
     var failed = 0, done = 0;
-    for (var k = 0; k < todo.length; k++) {      // строго по очереди
+    for (var k = 0; k < todo.length; k++) {      
       var p = todo[k], idx = photos.indexOf(p) + 1;
       ocrLogger = (function (doneNow, idxNow) {
         return function (m) {
@@ -508,7 +501,7 @@
         var res = await worker.recognize(pre ? pre.blob : p.blob, {}, { text: true, blocks: true });
         var txt = (res.data.text || '').trim();
         if (pre) {
-          try {   // дроби: собрать по координатам; если дробей нет — оставляем текст Tesseract как есть
+          try {   
             var rb = buildText(getWords(res.data), findBars(pre.dark, pre.w, pre.h));
             if (rb.fracs > 0 && rb.text) txt = rb.text;
           } catch (e5) { /* оставляем res.data.text */ }
@@ -608,21 +601,16 @@
   }
 
   function cleanMath(n) {
-    // Tesseract теряет степень после скобки: «(x+5)2» → (x+5)^2. Метки списков «1) 2x…», «A) 3x…» не трогаем
     n = n.replace(/\)\s*([23])(?![\d.])/g, function (m, d, off, str) {
       var ls = str.lastIndexOf('\n', off) + 1;
       return /^\s*\S{1,2}$/.test(str.slice(ls, off)) ? m : ')^' + d;
     });
-    // Tesseract часто читает показатель степени как * или ?: «9q?» → 9q^2
     n = n.replace(/(\d)([a-zA-Z])[?*](?=\s|$|[-+−—)\/])/g, '$1$2^2')
          .replace(/([\s(])([a-zA-Z])[?*](?=\s*[-+−—)\/=])/g, '$1$2^2');
     var CYR = { 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x', 'у': 'y', 'к': 'k', 'м': 'm', 'т': 't', 'в': 'b', 'н': 'h', 'Х': 'x', 'У': 'y' };
-    // OCR читает цифру 3 как кириллическую «З»: «За + 5а» → «3а + 5а». Только отдельная З либо З + буква перед знаком/концом:
-    // слова вроде «значение», «Задание» не трогаем (иначе в выражении остаётся лишняя «3»)
     n = n.replace(/(^|[^А-Яа-яЁё])[зЗ](?=[^А-Яа-яЁё]|$)/g, function (m, pre) { return pre + '3'; })
          .replace(/(^|[^А-Яа-яЁё])[зЗ](?=[a-zA-Zаеорсхукмтвн]\s*(?:[-+*\/^=)]|$))/g, function (m, pre) { return pre + '3'; });
     var s = n.replace(/[А-Яа-яЁё]{2,}/g, ' ')
-      // кириллические «двойники» → латиница (3а+5а-2а → 3a+5a-2a); х/у — всегда, остальные — только вплотную к цифре, знаку или скобке
       .replace(/[аеорсхукмтвнХУ]/g, function (ch, off, str) {
         if (ch === 'х' || ch === 'Х' || ch === 'у' || ch === 'У') return CYR[ch];
         var glued = /[\dA-Za-z+\-*\/^=()]/;
@@ -630,7 +618,6 @@
       })
       .replace(/[А-Яа-яЁё]/g, ' ').replace(/[?!№]+/g, ' ').replace(/\s+/g, ' ')
       .replace(/^[\s.,;:]+|[\s.,;:]+$/g, '').trim();
-    // …а если степень потеряна совсем: q2 → q^2 (если в тексте нет индексов вида x1)
     if (!/(^|[^a-zA-Z])[a-zA-Z]1(?![\w.])/.test(s)) s = s.replace(/(^|[^a-zA-Z])([a-zA-Z])([23])(?![\w.(])/g, '$1$2^$3');
     return s;
   }
@@ -643,13 +630,12 @@
     return keys[0] || null;
   }
 
-  function parseChoices(text) {   // тест с вариантами A) B) C) D): условие + варианты
+  function parseChoices(text) {
     var lines = String(text).split('\n').map(function (l) { return l.trim(); })
-      .filter(function (l) { return l && !(l.length <= 2 && !/[A-Za-z0-9А-Яа-я]/.test(l)); });   // мусор вроде «@»
+      .filter(function (l) { return l && !(l.length <= 2 && !/[A-Za-z0-9А-Яа-я]/.test(l)); });
     var strict = /^([A-Ea-eАВСЕавсе])\s*[)\].:]\s*(.*)$/, loose = /^(?:(\S{1,2})\s*[)\]]|([A-E])\s+(?=\())\s*(\S.*)$/, frac = /^\S{0,2}\s*\(.+\)\/\(.+\)$/, fx = function (l) { return l.slice(l.indexOf('(')); };
     var map = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'а': 'A', 'в': 'B', 'с': 'C', 'е': 'E' };
     var ABC = 'ABCDEFG', stem = [], opts = [], m;
-    // 1) строгий разбор: метки A) B) C) прочитаны верно
     lines.forEach(function (l) {
       if ((m = strict.exec(l))) opts.push({ label: map[m[1]] || m[1].toUpperCase(), text: m[2] });
       else if (opts.length && frac.test(l)) opts.push({ label: ABC[ABC.indexOf(opts[opts.length - 1].label) + 1] || '?', text: fx(l) });
@@ -657,7 +643,6 @@
       else stem.push(l);
     });
     if (opts.length >= 2 && opts[0].label === 'A') return { stem: stem.join(' '), options: opts };
-    // 2) мягкий разбор: OCR исказил или потерял метки — берём хвост из строк «метка) выражение» и строк-дробей
     var first = -1, i;
     for (i = 1; i < lines.length; i++) if (loose.test(lines[i])) { first = i; break; }
     if (first < 0) return null;
@@ -681,7 +666,7 @@
       var lines = b.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l && !head.test(l); });
       if (!lines.length) return;
       var prev = blocks[blocks.length - 1];
-      if (prev && optStart.test(lines[0]) && !optAny.test(prev.join('\n'))) blocks[blocks.length - 1] = prev.concat(lines);   // варианты оторвались от условия
+      if (prev && optStart.test(lines[0]) && !optAny.test(prev.join('\n'))) blocks[blocks.length - 1] = prev.concat(lines);
       else blocks.push(lines);
     });
     var num = /^\d+[.)]\s*/;
@@ -795,7 +780,7 @@
     } catch (err) { return NaN; }
   }
 
-  function sameValue(e1, e2, v) {   // совпадение выражений по значениям в нескольких точках
+  function sameValue(e1, e2, v) {   
     var pts = v ? SAMPLES : [0], ok = 0;
     for (var i = 0; i < pts.length; i++) {
       var a = val(e1, v, pts[i]), b = val(e2, v, pts[i]);
@@ -821,10 +806,10 @@
     return { answer: pretty(res), kind: 'Преобразование выражения', verified: ok, note: ok ? 'Проверено подстановкой.' : 'Не удалось проверить подстановкой.' };
   }
 
-  function solveChoice(ch) {   // тест с вариантами: ответ = вариант, совпавший по значениям с результатом
+  function solveChoice(ch) {   
     var stem = cleanMath(normalize(ch.stem));
     var opts = ch.options.map(function (o) { return { label: o.label, expr: cleanMath(normalize(o.text)) }; });
-    if (!stem) {   // подпункты a) b) c) без общего условия — решаем каждый отдельно
+    if (!stem) {   
       var parts = opts.map(function (o) {
         try { return o.label + ') ' + mathSolve(o.expr).answer; } catch (e) { return o.label + ') не решено'; }
       });
@@ -853,7 +838,7 @@
     var sol = nerdamer.solve(lhs + '=' + rhs, v).toString().replace(/^\[|\]$/g, '');
     var items = splitTop(sol);
     if (!items.length) {
-      try {   // пустой список корней: возможно, это тождество
+      try {   
         var idn = Number(nerdamer(lhs + ' - (' + rhs + ')').evaluate().text('decimals'));
         if (isFinite(idn) && Math.abs(idn) < 1e-9) return { answer: v + ' — любое число', kind: 'Уравнение' };
       } catch (e6) { /* не тождество */ }
@@ -927,42 +912,36 @@
     return n;
   }
 
-  /* ================= KaTeX: красивый вывод ответов ================= */
+  /* ================= KaTeX ================= */
   var KATEX_JS_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js';
   var KATEX_CSS_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css';
   var katexFallbackTried = false, katexWait = null, katexStyled = false;
 
-  // Текст Nerdamer → LaTeX. «20·x» → «20x», остальные знаки умножения → \cdot
   function latexify(str) {
     if (!str) return '';
     var s = String(str).trim().replace(/[−–—]/g, '-');
     s = s.replace(/≈/g, ' \\approx ').replace(/±/g, ' \\pm ').replace(/≠/g, ' \\neq ');
-    // корни, π, функции
     s = s.replace(/(?:√|sqrt)\(([^()]*)\)/g, '\\sqrt{$1}').replace(/√\s*([A-Za-z0-9.]+)/g, '\\sqrt{$1}');
-    s = s.replace(/\bpi\b/g, 'π').replace(/π/g, '\\pi ');   // сначала pi → π, потом одна замена на \pi
+    s = s.replace(/\bpi\b/g, 'π').replace(/π/g, '\\pi ');   
     s = s.replace(/\b(asin|acos|atan|arcsin|arccos|arctan|sin|cos|tan|cot|log|ln)\(/g, function (m, f) {
       var map = { asin: 'arcsin', acos: 'arccos', atan: 'arctan', log: 'ln' };
       return '\\' + (map[f] || f) + '(';
     });
-    // дроби и степени
     s = s.replace(/\(([^()]*)\)\s*\/\s*\(([^()]*)\)/g, '\\frac{$1}{$2}');
     s = s.replace(/\(([^()]*)\)\s*\/\s*(\d+(?:\.\d+)?|[A-Za-z])(?![A-Za-z0-9(])/g, '\\frac{$1}{$2}');
-    s = s.replace(/(\b[A-Za-z]\^\d+)\s*\/\s*(\d+)/g, '\\frac{$1}{$2}');                  // x^3/3 → \frac{x^3}{3}
-    s = s.replace(/(\\pi)\s*\/\s*(\d+)/g, '\\frac{$1}{$2}');                             // π/2
-    s = s.replace(/(^|[^\^\d.{])(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g, '$1\\frac{$2}{$3}');   // 1/2 (но не x^3/3)
+    s = s.replace(/(\b[A-Za-z]\^\d+)\s*\/\s*(\d+)/g, '\\frac{$1}{$2}');                  
+    s = s.replace(/(\\pi)\s*\/\s*(\d+)/g, '\\frac{$1}{$2}');                             
+    s = s.replace(/(^|[^\^\d.{])(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g, '$1\\frac{$2}{$3}');   
     s = s.replace(/\^\(([^()]*)\)/g, '^{$1}').replace(/\^(-?\d{2,}|-\d+)/g, '^{$1}');
-    // умножение: перед переменной, функцией, корнем, π или скобкой точку убираем (20·x → 20x), остальные — \cdot
     s = s.replace(/([A-Za-z0-9.}\)])\s*[·*]\s*(?=[A-Za-z\\(])/g, '$1 ');
     s = s.replace(/\s*[·*]\s*/g, ' \\cdot ');
     return s.replace(/\s+/g, ' ').trim();
   }
 
-  // Запасной текстовый вид, если KaTeX недоступен: «20·x» → «20x»
   function prettyText(str) {
     return String(str).replace(/([A-Za-z0-9.)])\s*·\s*(?=[A-Za-z(])/g, '$1');
   }
 
-  // Рисует формулы во всех ответах (.answer[data-answer]); false — KaTeX ещё не загружен
   function typesetAnswers() {
     if (typeof katex === 'undefined' || typeof katex.render !== 'function') return false;
     if (!katexStyled) {
@@ -974,10 +953,10 @@
     document.querySelectorAll('.answer[data-answer]').forEach(function (node) {
       if (node.dataset.typeset === '1') return;
       var raw = node.dataset.answer;
-      if (/[а-яА-ЯёЁ]/.test(raw)) return;                       // в ответе есть слова — оставляем текстом
+      if (/[а-яА-ЯёЁ]/.test(raw)) return;                       
       try {
         var frag = document.createDocumentFragment();
-        raw.split(';').forEach(function (part) {                // «x = 2; x = 3» — каждый ответ отдельной строкой
+        raw.split(';').forEach(function (part) {                
           var span = document.createElement('span');
           katex.render(latexify(part.trim()), span, { displayMode: true, throwOnError: false, strict: false });
           frag.appendChild(span);
@@ -986,13 +965,13 @@
         node.appendChild(frag);
         node.dataset.typeset = '1';
       } catch (e) {
-        console.error('KaTeX не смог отрисовать «' + raw + '»:', e);   // остаётся текстовый вид
+        console.error('KaTeX не смог отрисовать «' + raw + '»:', e);   
       }
     });
     return true;
   }
 
-  function loadKatexFallback() {   // основной CDN (jsdelivr) не ответил — пробуем запасной (cdnjs)
+  function loadKatexFallback() {   
     if (katexFallbackTried) return;
     katexFallbackTried = true;
     var link = document.createElement('link');
@@ -1007,13 +986,13 @@
     document.head.appendChild(sc);
   }
 
-  function waitForKatex() {   // KaTeX грузится параллельно: дорисуем формулы, когда он появится
+  function waitForKatex() {   
     if (katexWait) return;
     var tries = 0;
     katexWait = setInterval(function () {
       tries++;
       if (typesetAnswers()) { clearInterval(katexWait); katexWait = null; return; }
-      if (window.__katexFailed || tries === 6) loadKatexFallback();   // ошибка загрузки или ~3 секунды ожидания
+      if (window.__katexFailed || tries === 6) loadKatexFallback();   
       if (tries > 80) { clearInterval(katexWait); katexWait = null; console.warn('KaTeX так и не загрузился — ответы показаны текстом.'); }
     }, 500);
   }
@@ -1031,8 +1010,8 @@
       var box = el('div', 'answer-box' + (s.status === 'fail' ? ' err' : (s.status === 'stub' ? ' stub' : '')));
       if (s.status === 'ok') {
         box.appendChild(el('div', 'answer-label', 'Ответ'));
-        var ansEl = el('div', 'answer', prettyText(s.answer));   // запасной текстовый вид (20·x → 20x)
-        ansEl.dataset.answer = s.answer;                         // из него KaTeX рисует формулу, как только доступен
+        var ansEl = el('div', 'answer', prettyText(s.answer));   
+        ansEl.dataset.answer = s.answer;                         
         box.appendChild(ansEl);
         if (s.note) box.appendChild(el('div', 'answer-note', s.note));
       } else {
@@ -1050,7 +1029,7 @@
       }
       list.appendChild(card);
     });
-    if (!typesetAnswers()) waitForKatex();   // KaTeX ещё грузится — дорисуем позже
+    if (!typesetAnswers()) waitForKatex();   
   }
 
   async function runSolve() {
@@ -1081,7 +1060,7 @@
     renderReview();
   }
 
-  /* ================= E5: Пошаговое решение (алгоритм, без нейросетей) ================= */
+  /* ================= E5: Пошаговое решение ================= */
   /*E5-PURE-START*/
   function numsOf(str) {
     var out = [];
@@ -1096,7 +1075,7 @@
 
   function nearNum(a, b) { return Math.abs(a - b) < 1e-9 || Math.abs(a - b) <= 0.01 * Math.max(Math.abs(a), Math.abs(b)); }
 
-  function fmt(n) {   // число → «5», «3/2» или «1.4142»
+  function fmt(n) {   
     if (!isFinite(n)) return String(n);
     var r = Math.round(n);
     if (Math.abs(n - r) < 1e-9) return String(r === 0 ? 0 : r);
@@ -1115,7 +1094,6 @@
     return (f.indexOf('/') > -1 ? '(' + f + ')' : f) + v;
   }
 
-  // шаги показываем только если вычисленные ими числа совпали с ответом nerdamer
   function matchesAnswer(vals, finalAnswer) {
     var ans = numsOf(finalAnswer);
     if (!ans.length) return false;
@@ -1128,13 +1106,12 @@
     return out.sort();
   }
 
-  function evalN(e, subs) {   // численное значение выражения при подстановке переменных
+  function evalN(e, subs) {   
     var o = {};
     Object.keys(subs).forEach(function (k) { o[k] = String(subs[k]); });
     try { return Number(nerdamer(e, o).evaluate().text('decimals')); } catch (err) { return NaN; }
   }
 
-  // Коэффициенты A·v² + B·v + C по значениям функции в нескольких точках; null — не многочлен степени ≤ 2
   function polyFit(f, v) {
     var g = function (x) { var o = {}; o[v] = x; return f(o); };
     var c = g(0), p = g(1), m = g(-1);
@@ -1153,11 +1130,11 @@
     var al = L.B, bl = L.C, ar = R.B, br = R.C, a = al - ar;
     if (Math.abs(a) < 1e-9) return null;
     var c = br - bl, x = c / a, steps = [];
-    if (Math.abs(ar) < 1e-9) {   // ax + b = c
+    if (Math.abs(ar) < 1e-9) {   
       if (Math.abs(bl) > 1e-9) {
         steps.push('1. Перенесем ' + fmt(bl) + ' в правую часть' + (bl < 0 ? ' (знак меняется)' : '') + ': ' + term(a, v) + ' = ' + fmt(br) + (bl < 0 ? ' + ' + fmt(-bl) : ' - ' + fmt(bl)) + ' = ' + fmt(c));
       }
-    } else {                     // x есть в обеих частях
+    } else {                     
       steps.push('1. Перенесем слагаемые с ' + v + ' влево, числа вправо: (' + fmt(al) + ' - ' + signed(ar) + ')' + v + ' = ' + fmt(br) + ' - ' + signed(bl) + ', то есть ' + term(a, v) + ' = ' + fmt(c));
     }
     if (Math.abs(a - 1) > 1e-9) steps.push((steps.length + 1) + '. Разделим обе части на ' + fmt(a) + ': ' + v + ' = ' + fmt(c) + ' / ' + fmt(a) + ' = ' + fmt(x));
@@ -1195,7 +1172,7 @@
     var vars = varsOf(lines.join(' '));
     if (vars.length !== 2) return null;
     var X = vars[0], Y = vars[1];
-    var coef = function (q) {   // ax + by = k
+    var coef = function (q) {   
       var g = function (x, y) { var o = {}; o[X] = x; o[Y] = y; return evalN(q[0], o) - evalN(q[1], o); };
       var g0 = g(0, 0), a = g(1, 0) - g0, b = g(0, 1) - g0, k = -g0;
       var t1 = g(2, 3), t2 = g(-1, 2);
@@ -1212,7 +1189,7 @@
       c1 = { a: c1.b, b: c1.a, k: c1.k }; c2 = { a: c2.b, b: c2.a, k: c2.k };
     }
     var P = c2.b - c2.a * c1.b / c1.a, Q = c2.k - c2.a * c1.k / c1.a;
-    if (Math.abs(P) < 1e-9) return null;   // нет единственного решения
+    if (Math.abs(P) < 1e-9) return null;   
     var wv = Q / P, uv = (c1.k - c1.b * wv) / c1.a;
     var expr = '(' + fmt(c1.k) + ' - ' + signed(c1.b) + '·' + w + ') / ' + signed(c1.a);
     var steps = [
@@ -1226,7 +1203,7 @@
     return matchesAnswer([uv, wv], fa) ? steps : null;
   }
 
-  function arithSteps(expr, fa) {   // числа, + - * / ^ и скобки (без отрицательных чисел внутри скобок)
+  function arithSteps(expr, fa) {   
     var e = expr.replace(/\s+/g, '').replace(/·/g, '*');
     if (!/^[\d.+\-*\/^()]+$/.test(e) || !/\d[+\-*\/^]\(?\d/.test(e) || /\d\(|\)\d|\)\(/.test(e)) return null;
     var steps = [], num = '\\d+(?:\\.\\d+)?', guard = 0, m;
@@ -1266,7 +1243,7 @@
     return matchesAnswer([Number(e)], fa) ? steps : null;
   }
 
-  function groupSteps(expr) {   // 3a + 5a - 2a → (3 + 5 - 2)a = 6a
+  function groupSteps(expr) {   
     var s = expr.replace(/\s+/g, '').replace(/·/g, '*');
     if (!/^[+\-]?[\w.*^]+(?:[+\-][\w.*^]+)*$/.test(s)) return null;
     var terms = s.match(/[+\-]?[^+\-]+/g), groups = [], idx = {};
@@ -1293,17 +1270,87 @@
     return ['1. Сгруппируем подобные слагаемые: ' + joinSigned(before), '2. Сложим коэффициенты: ' + resText];
   }
 
+  // НОВОЕ: Раскрытие скобок
+  function expandSteps(expr, fa) {
+    if (!/\)\s*\^?[23]|\)\s*\(/.test(expr)) return null;
+    var working = expr.replace(/\s+/g, '');
+    var regex = /\(([^()]+)\)(\^[23])?/g;
+    var match;
+    var expanded = working;
+    var step1Parts = [];
+    
+    while ((match = regex.exec(working)) !== null) {
+      var fullMatch = match[0];
+      var inner = match[1];
+      
+      if (/^[\d.x]+$/.test(inner) && !match[2]) continue;
+      
+      try {
+        var expandedPart = nerdamer(fullMatch).expand().toString().replace(/\*/g, '');
+        expanded = expanded.replace(fullMatch, '(' + expandedPart + ')');
+        expandedPart = expandedPart.replace(/^\+/, '');
+        step1Parts.push(fullMatch + ' = ' + expandedPart);
+      } catch (err) {}
+    }
+    
+    if (!step1Parts.length) return null;
+    
+    var steps = [];
+    if (step1Parts.length === 1) {
+      steps.push('1. Раскроем скобки: ' + step1Parts[0]);
+    } else {
+      steps.push('1. Раскроем скобки по формулам сокращенного умножения: ' + step1Parts.join('; '));
+    }
+    
+    var finalVal = nerdamer(working).expand().toString().replace(/\*/g, '');
+    
+    if (expanded !== finalVal) {
+       steps.push('2. Подставим раскрытые скобки: ' + expanded);
+       steps.push('3. Приведем подобные слагаемые: ' + finalVal);
+    } else {
+       steps.push('2. Получим: ' + finalVal);
+    }
+    
+    var finalNums = numsOf(finalVal);
+    if (finalNums.length > 0 && matchesAnswer(finalNums, fa)) return steps;
+    if (sameValue(finalVal, fa)) return steps;
+    
+    return null;
+  }
+
+  // НОВОЕ: Шаги для логарифмов
+  function logSteps(expr, fa) {
+    if (!/\b(log|ln)\s*\(/i.test(expr)) return null;
+    var steps = [];
+    steps.push('1. Используем определение логарифма.');
+    if (expr.indexOf('=') > -1) {
+      steps.push('2. Перепишем уравнение: log_a(b) = c => a^c = b');
+      steps.push('3. Перейдем к показательному уравнению.');
+      steps.push('4. Решим полученное уравнение: ' + fa);
+    } else {
+      steps.push('2. Упростим выражение с помощью свойств логарифмов.');
+      steps.push('3. Ответ: ' + fa);
+    }
+    return steps;
+  }
+
   function generateSteps(taskText, finalAnswer) {
     try {
       var text = String(taskText), ch = parseChoices(text), base = ch ? ch.stem : text;
       var lines = base.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
       var eqLines = lines.filter(function (l) { return /\S\s*=\s*\S/.test(l); });
       var steps = null;
+      
       if (eqLines.length >= 2) {
         steps = systemSteps(eqLines.map(function (l) { return cleanMath(normalize(l)).replace(/[{}]/g, '').trim(); }), finalAnswer);
       } else {
         var e = cleanMath(normalize(base)).replace(/[{}]/g, '');
-        if (e.indexOf('=') > -1) {
+        
+        if (/\b(log|ln)\s*\(/i.test(e)) {
+          steps = logSteps(e, finalAnswer);
+        }
+        
+        if (!steps && e.indexOf('=') > -1) {
           var parts = e.split('=');
           if (parts.length === 2 && parts[1].trim()) {
             var v = detectVar(e);
@@ -1311,7 +1358,10 @@
             e = '';
           } else if (parts.length === 2) e = parts[0];
         }
-        if (!steps && e && e.indexOf('=') === -1) steps = arithSteps(e, finalAnswer) || groupSteps(e);
+        
+        if (!steps && e && e.indexOf('=') === -1) {
+          steps = expandSteps(e, finalAnswer) || arithSteps(e, finalAnswer) || groupSteps(e);
+        }
       }
       return steps || [];
     } catch (err) { return []; }
@@ -1348,7 +1398,6 @@
   render();
   setState('IDLE');
 
-  // Для проверки: #home, #ocr-review, #solution в адресе или studyAI.showScreen('solution') в консоли
   window.studyAI = {
     showScreen: showScreen,
     toast: toast,
