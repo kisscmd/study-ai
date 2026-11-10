@@ -469,7 +469,15 @@
           ocrProgress(0, 'Загрузка языка ' + Math.round((m.progress || 0) * 100) + '%', true);
         }
       };
-      worker = await Tesseract.createWorker(OCR_LANG, 1, { logger: function (m) { if (ocrLogger) ocrLogger(m); } });
+      
+      // ИСПРАВЛЕНО: Жестко прописаны пути для Tesseract, чтобы не было AbortError
+      worker = await Tesseract.createWorker(OCR_LANG, 1, {
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
+        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
+        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+        logger: function (m) { if (ocrLogger) ocrLogger(m); }
+      });
+      
       try {
         await worker.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1', user_defined_dpi: '300' });
       } catch (e3) { /* параметры не критичны */ }
