@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Study AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+
+<!-- PWA НАЧАЛО -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6366F1">
+<!-- PWA КОНЕЦ -->
+
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="logo">Study AI</div>
+    <nav class="top-nav" aria-label="Основная навигация">
+      <button class="nav-btn" type="button" data-nav="home"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg>Камера</button>
+      <button class="nav-btn" type="button" data-nav="history"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg>История</button>
+      <button class="nav-btn" type="button" data-nav="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Настройки</button>
+    </nav>
+    <button class="icon-btn history-btn" type="button" data-nav="history" aria-label="История"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg></button>
+  </div>
+</header>
+
+<main class="content" id="content">
+
+  <section class="screen" id="screen-home" aria-labelledby="h-home">
+    <h1 id="h-home">Новая задача</h1>
+    <div class="stack">
+      <div class="zone" id="home-dropzone">
+        <div class="zone-inner">
+          <p class="zone-title">Добавьте фото задач</p>
+          <p class="zone-hint">До 20 фото: страницы учебника или несколько задач. Фото не покидают устройство.</p>
+          <div class="zone-actions">
+            <button class="btn btn-primary" type="button" id="btn-camera">Камера</button>
+            <button class="btn btn-secondary" type="button" id="btn-upload">Загрузить</button>
+          </div>
+        </div>
+      </div>
+      <input class="visually-hidden" type="file" id="input-camera" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true">
+      <input class="visually-hidden" type="file" id="input-upload" accept="image/*" multiple tabindex="-1" aria-hidden="true">
+      <div class="progress" id="home-progress" hidden><div class="progress-bar" id="progress-bar"></div></div>
+      <p class="status" id="home-status" role="status" hidden></p>
+      <div class="meta-row" id="home-meta" hidden>
+        <span class="photo-summary" id="photo-summary"></span>
+        <button class="btn btn-ghost" type="button" id="btn-clear">Очистить</button>
+      </div>
+      <ul class="grid-previews" id="home-previews" aria-label="Загруженные фото"></ul>
+      <button class="btn btn-primary btn-block" type="button" id="btn-recognize" hidden>Распознать текст</button>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-ocr-review" aria-labelledby="h-ocr">
+    <h1 id="h-ocr">Проверка текста</h1>
+    <div class="stack">
+      <div class="warn-banner" id="ocr-warning" role="alert" hidden></div>
+      <div class="pager" id="ocr-pager" hidden>
+        <button class="icon-btn" type="button" id="ocr-prev" aria-label="Предыдущее фото"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <span class="photo-summary" id="ocr-page-label"></span>
+        <button class="icon-btn" type="button" id="ocr-next" aria-label="Следующее фото"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+      </div>
+      <div class="card photo-frame" id="ocr-photo"></div>
+      <label for="ocr-text" class="sr-only">Распознанный текст</label>
+      <textarea id="ocr-text" placeholder="Здесь появится распознанный текст" disabled></textarea>
+      <p class="status" id="ocr-conf"></p>
+    </div>
+    <div class="footer-action actions-row">
+      <button class="btn btn-secondary" type="button" id="btn-ocr-back">Назад</button>
+      <button class="btn btn-primary" type="button" id="btn-solve">Решить</button>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-solution" aria-labelledby="h-sol">
+    <h1 id="h-sol">Решение</h1>
+    <div class="stack">
+      <div class="card" id="solution-task"></div>
+      <div class="stack" id="solution-steps"></div>
+    </div>
+    <div class="footer-action">
+      <button class="btn btn-primary btn-block" type="button" id="btn-new-task">Новая задача</button>
+    </div>
+  </section>
+
+</main>
+
+<nav class="bottom-nav" aria-label="Основная навигация">
+  <div class="bottom-nav-inner">
+    <button class="nav-btn" type="button" data-nav="home"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg>Камера</button>
+    <button class="nav-btn" type="button" data-nav="history"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg>История</button>
+    <button class="nav-btn" type="button" data-nav="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Настройки</button>
+  </div>
+</nav>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- PWA НАЧАЛО -->
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+  }
+</script>
+<!-- PWA КОНЕЦ -->
+
+<script src="app.js"></script>
+</body>
+</html>
