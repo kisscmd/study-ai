@@ -927,18 +927,95 @@
     return n;
   }
 
-  // Превращает текст Nerdamer в красивый LaTeX
+  /* ================= KaTeX: красивый вывод ответов ================= */
+  var KATEX_JS_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js';
+  var KATEX_CSS_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css';
+  var katexFallbackTried = false, katexWait = null, katexStyled = false;
+
+  // Текст Nerdamer → LaTeX. «20·x» → «20x», остальные знаки умножения → \cdot
   function latexify(str) {
     if (!str) return '';
-    var s = String(str);
-    s = s.replace(/(\d)\*([a-zA-Z])/g, '$1$2'); // 20*x -> 20x
-    s = s.replace(/·/g, ' \\cdot ');            // <--- ИСПРАВЛЕНО: точку меняем на \cdot
-    s = s.replace(/\*/g, ' \\cdot ');           // обычные * -> \cdot
-    s = s.replace(/sqrt\(([^()]*)\)/g, '\\sqrt{$1}'); // sqrt(5) -> √5
-    s = s.replace(/\bpi\b/g, '\\pi');           // pi -> π
-    s = s.replace(/\blog\(/g, '\\ln(');         // log -> ln
-    s = s.replace(/≈/g, '\\approx');
-    return s;
+    var s = String(str).trim().replace(/[−–—]/g, '-');
+    s = s.replace(/≈/g, ' \\approx ').replace(/±/g, ' \\pm ').replace(/≠/g, ' \\neq ');
+    // корни, π, функции
+    s = s.replace(/(?:√|sqrt)\(([^()]*)\)/g, '\\sqrt{$1}').replace(/√\s*([A-Za-z0-9.]+)/g, '\\sqrt{$1}');
+    s = s.replace(/\bpi\b/g, 'π').replace(/π/g, '\\pi ');   // сначала pi → π, потом одна замена на \pi
+    s = s.replace(/\b(asin|acos|atan|arcsin|arccos|arctan|sin|cos|tan|cot|log|ln)\(/g, function (m, f) {
+      var map = { asin: 'arcsin', acos: 'arccos', atan: 'arctan', log: 'ln' };
+      return '\\' + (map[f] || f) + '(';
+    });
+    // дроби и степени
+    s = s.replace(/\(([^()]*)\)\s*\/\s*\(([^()]*)\)/g, '\\frac{$1}{$2}');
+    s = s.replace(/\(([^()]*)\)\s*\/\s*(\d+(?:\.\d+)?|[A-Za-z])(?![A-Za-z0-9(])/g, '\\frac{$1}{$2}');
+    s = s.replace(/(\b[A-Za-z]\^\d+)\s*\/\s*(\d+)/g, '\\frac{$1}{$2}');                  // x^3/3 → \frac{x^3}{3}
+    s = s.replace(/(\\pi)\s*\/\s*(\d+)/g, '\\frac{$1}{$2}');                             // π/2
+    s = s.replace(/(^|[^\^\d.{])(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g, '$1\\frac{$2}{$3}');   // 1/2 (но не x^3/3)
+    s = s.replace(/\^\(([^()]*)\)/g, '^{$1}').replace(/\^(-?\d{2,}|-\d+)/g, '^{$1}');
+    // умножение: перед переменной, функцией, корнем, π или скобкой точку убираем (20·x → 20x), остальные — \cdot
+    s = s.replace(/([A-Za-z0-9.}\)])\s*[·*]\s*(?=[A-Za-z\\(])/g, '$1 ');
+    s = s.replace(/\s*[·*]\s*/g, ' \\cdot ');
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
+  // Запасной текстовый вид, если KaTeX недоступен: «20·x» → «20x»
+  function prettyText(str) {
+    return String(str).replace(/([A-Za-z0-9.)])\s*·\s*(?=[A-Za-z(])/g, '$1');
+  }
+
+  // Рисует формулы во всех ответах (.answer[data-answer]); false — KaTeX ещё не загружен
+  function typesetAnswers() {
+    if (typeof katex === 'undefined' || typeof katex.render !== 'function') return false;
+    if (!katexStyled) {
+      katexStyled = true;
+      var st = document.createElement('style');
+      st.textContent = '.answer .katex-display{margin:.2em 0;text-align:left}.answer .katex-display>.katex{text-align:left}';
+      document.head.appendChild(st);
+    }
+    document.querySelectorAll('.answer[data-answer]').forEach(function (node) {
+      if (node.dataset.typeset === '1') return;
+      var raw = node.dataset.answer;
+      if (/[а-яА-ЯёЁ]/.test(raw)) return;                       // в ответе есть слова — оставляем текстом
+      try {
+        var frag = document.createDocumentFragment();
+        raw.split(';').forEach(function (part) {                // «x = 2; x = 3» — каждый ответ отдельной строкой
+          var span = document.createElement('span');
+          katex.render(latexify(part.trim()), span, { displayMode: true, throwOnError: false, strict: false });
+          frag.appendChild(span);
+        });
+        node.textContent = '';
+        node.appendChild(frag);
+        node.dataset.typeset = '1';
+      } catch (e) {
+        console.error('KaTeX не смог отрисовать «' + raw + '»:', e);   // остаётся текстовый вид
+      }
+    });
+    return true;
+  }
+
+  function loadKatexFallback() {   // основной CDN (jsdelivr) не ответил — пробуем запасной (cdnjs)
+    if (katexFallbackTried) return;
+    katexFallbackTried = true;
+    var link = document.createElement('link');
+    link.rel = 'stylesheet'; link.href = KATEX_CSS_FALLBACK;
+    document.head.appendChild(link);
+    var sc = document.createElement('script');
+    sc.src = KATEX_JS_FALLBACK;
+    sc.onload = function () { typesetAnswers(); };
+    sc.onerror = function () {
+      console.warn('KaTeX недоступен ни на одном CDN. Положите katex.min.js, katex.min.css и папку fonts рядом с index.html.');
+    };
+    document.head.appendChild(sc);
+  }
+
+  function waitForKatex() {   // KaTeX грузится параллельно: дорисуем формулы, когда он появится
+    if (katexWait) return;
+    var tries = 0;
+    katexWait = setInterval(function () {
+      tries++;
+      if (typesetAnswers()) { clearInterval(katexWait); katexWait = null; return; }
+      if (window.__katexFailed || tries === 6) loadKatexFallback();   // ошибка загрузки или ~3 секунды ожидания
+      if (tries > 80) { clearInterval(katexWait); katexWait = null; console.warn('KaTeX так и не загрузился — ответы показаны текстом.'); }
+    }, 500);
   }
 
   function renderSolutions() {
@@ -954,26 +1031,8 @@
       var box = el('div', 'answer-box' + (s.status === 'fail' ? ' err' : (s.status === 'stub' ? ' stub' : '')));
       if (s.status === 'ok') {
         box.appendChild(el('div', 'answer-label', 'Ответ'));
-        var ansEl = el('div', 'answer');
-        
-        // Если в ответе есть русские буквы или KaTeX не загрузился, пишем текстом
-        if (/[а-яА-Я]/.test(s.answer) || typeof katex === 'undefined') {
-          ansEl.textContent = s.answer;
-        } else {
-          try {
-            // Разбиваем ответы через ; (например "x = 2; x = 3") и рисуем каждый на новой строке
-            var parts = s.answer.split(';');
-            parts.forEach(function(p, i) {
-              if (i > 0) ansEl.appendChild(document.createElement('br'));
-              var span = document.createElement('span');
-              katex.render(latexify(p.trim()), span, { displayMode: true, throwOnError: false });
-              ansEl.appendChild(span);
-            });
-          } catch (e) {
-            ansEl.textContent = s.answer; // если KaTeX сломался, показываем как было
-          }
-        }
-        
+        var ansEl = el('div', 'answer', prettyText(s.answer));   // запасной текстовый вид (20·x → 20x)
+        ansEl.dataset.answer = s.answer;                         // из него KaTeX рисует формулу, как только доступен
         box.appendChild(ansEl);
         if (s.note) box.appendChild(el('div', 'answer-note', s.note));
       } else {
@@ -991,6 +1050,7 @@
       }
       list.appendChild(card);
     });
+    if (!typesetAnswers()) waitForKatex();   // KaTeX ещё грузится — дорисуем позже
   }
 
   async function runSolve() {
@@ -1294,6 +1354,7 @@
     toast: toast,
     getPhotos: function () { return photos.map(function (p) { return { id: p.id, blob: p.blob }; }); },
     getOcrResults: getOcrResults,
+    latexify: latexify,
     getSolutions: function () { return solutions.slice(); },
     reset: resetAll
   };
