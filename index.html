@@ -26,6 +26,7 @@
   <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></symbol>
   <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/><path d="M10 11v6M14 11v6"/></symbol>
 </svg>
 
 <header class="topbar">
@@ -42,6 +43,7 @@
 
 <main class="content" id="content">
 
+  <!-- ЭКРАН 1: КАМЕРА -->
   <section class="screen" id="screen-home" aria-labelledby="h-home">
     <h1 id="h-home">Новая задача</h1>
     <div class="stack">
@@ -68,6 +70,7 @@
     </div>
   </section>
 
+  <!-- ЭКРАН 2: ПРОВЕРКА ТЕКСТА -->
   <section class="screen" id="screen-ocr-review" aria-labelledby="h-ocr">
     <h1 id="h-ocr">Проверка текста</h1>
     <div class="stack">
@@ -88,6 +91,7 @@
     </div>
   </section>
 
+  <!-- ЭКРАН 3: РЕШЕНИЕ -->
   <section class="screen" id="screen-solution" aria-labelledby="h-sol">
     <h1 id="h-sol">Решение</h1>
     <div class="stack">
@@ -96,6 +100,35 @@
     </div>
     <div class="footer-action">
       <button class="btn btn-primary btn-block" type="button" id="btn-new-task">Новая задача</button>
+    </div>
+  </section>
+
+  <!-- ЭКРАН 4: ИСТОРИЯ -->
+  <section class="screen" id="screen-history" aria-labelledby="h-history">
+    <h1 id="h-history">История</h1>
+    <div class="stack" id="history-list"></div>
+    <div class="footer-action">
+      <button class="btn btn-secondary btn-block" type="button" id="btn-clear-history">Очистить историю</button>
+    </div>
+  </section>
+
+  <!-- ЭКРАН 5: НАСТРОЙКИ -->
+  <section class="screen" id="screen-settings" aria-labelledby="h-settings">
+    <h1 id="h-settings">Настройки</h1>
+    <div class="stack">
+      <div class="card">
+        <h3 style="margin-top:0; margin-bottom: 12px; font-size: 16px;">Тема оформления</h3>
+        <select id="theme-select" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--primary); font-size: 16px;">
+          <option value="system">Системная</option>
+          <option value="light">Светлая</option>
+          <option value="dark">Темная</option>
+        </select>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0; margin-bottom: 12px; font-size: 16px;">Данные приложения</h3>
+        <p class="status" style="margin-bottom: 12px;">Удалить всю историю и настройки. Приложение перезагрузится.</p>
+        <button class="btn btn-primary" style="background: var(--error); border-color: var(--error); width: 100%;" type="button" id="btn-reset-data">Сбросить все данные</button>
+      </div>
     </div>
   </section>
 
