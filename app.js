@@ -1,1320 +1,949 @@
-(function () {
+(() => {
   'use strict';
 
-  // --- НАСТРОЙКА ТЕМЫ ---
-  function applyTheme(theme) {
-    if (theme === 'system') {
-      var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-    } else {
-      document.documentElement.setAttribute('data-theme', theme);
-    }
-    localStorage.setItem('study_ai_theme', theme);
-    var sel = document.getElementById('theme-select');
-    if (sel) sel.value = theme;
-  }
-  applyTheme(localStorage.getItem('study_ai_theme') || 'system');
+  const STORAGE_KEYS = Object.freeze({
+    history: 'study-ai-history-v1',
+    theme: 'study-ai-theme-v1'
+  });
 
-  var SCREENS = {
-    'home': 'screen-home',
-    'ocr-review': 'screen-ocr-review',
-    'solution': 'screen-solution',
-    'history': 'screen-history',
-    'settings': 'screen-settings'
+  const CDN = Object.freeze({
+    nerdamer: 'https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/all.min.js',
+    tesseract: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+  });
+
+  const state = {
+    screen: 'home',
+    files: [],
+    items: [],
+    cropIndex: 0,
+    ocrIndex: 0,
+    cropObjectUrl: '',
+    cropDrag: null,
+    toastTimer: null,
+    tesseractWorker: null,
+    tesseractPromise: null,
+    nerdamerPromise: null
   };
-  var current = 'home';
-  var toastTimer = null;
 
-  function showScreen(name) {
-    if (!SCREENS[name]) return;
-    current = name;
-    Object.keys(SCREENS).forEach(function (key) {
-      document.getElementById(SCREENS[key]).classList.toggle('active', key === name);
-    });
-    document.querySelectorAll('.nav-btn[data-nav]').forEach(function (btn) {
-      if (btn.getAttribute('data-nav') === name) {
-        btn.setAttribute('aria-current', 'page');
-      } else {
-        btn.removeAttribute('aria-current');
-      }
-    });
-    document.getElementById('content').scrollTop = 0;
-    try {
-      if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
-    } catch (e) { }
-    if (name === 'history') renderHistory();
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+  const elements = {};
+
+  function cacheElements() {
+    elements.html = document.documentElement;
+    elements.content = $('#content');
+    elements.manualArea = $('#manual-area');
+    elements.mathInput = $('#math-input');
+    elements.keyboard = $('#math-keyboard');
+    elements.cropContainer = $('#crop-container');
+    elements.cropImage = $('#crop-image');
+    elements.cropBox = $('#crop-box');
+    elements.homeProgress = $('#home-progress');
+    elements.progressBar = $('#progress-bar');
+    elements.homeStatus = $('#home-status');
+    elements.ocrWarning = $('#ocr-warning');
+    elements.ocrPager = $('#ocr-pager');
+    elements.ocrPrevious = $('#ocr-prev');
+    elements.ocrNext = $('#ocr-next');
+    elements.ocrPageLabel = $('#ocr-page-label');
+    elements.ocrPhoto = $('#ocr-photo');
+    elements.ocrText = $('#ocr-text');
+    elements.ocrConfidence = $('#ocr-conf');
+    elements.solutionTask = $('#solution-task');
+    elements.solutionSteps = $('#solution-steps');
+    elements.historyList = $('#history-list');
+    elements.themeSelect = $('#theme-select');
+    elements.toast = $('#toast');
   }
 
-  function toast(message, ms) {
-    var el = document.getElementById('toast');
-    el.textContent = message;
-    el.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { el.classList.remove('show'); }, ms || 3000);
-  }
-
-  document.querySelectorAll('[data-nav]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var target = btn.getAttribute('data-nav');
-      if (SCREENS[target]) showScreen(target);
-    });
-  });
-
-  document.getElementById('btn-new-task').addEventListener('click', function () { if (window.studyAI) window.studyAI.reset(); else showScreen('home'); });
-  window.addEventListener('hashchange', function () {
-    var name = location.hash.slice(1);
-    if (SCREENS[name] && name !== current) showScreen(name);
-  });
-
-  // Настройки
-  document.getElementById('btn-reset-data').addEventListener('click', function() {
-    if (confirm('Вы уверены? Все данные и история будут удалены.')) {
-      localStorage.clear();
-      if ('caches' in window) { caches.keys().then(function(names) { for (var name of names) caches.delete(name); }); }
-      location.reload();
-    }
-  });
-  document.getElementById('theme-select').addEventListener('change', function(e) { applyTheme(e.target.value); });
-
-  // История
-  var historyList = document.getElementById('history-list');
-  
-  function saveToHistory(text, answer) {
-    var history = JSON.parse(localStorage.getItem('study_ai_history') || '[]');
-    history.unshift({ id: Date.now(), date: new Date().toISOString(), text: text, answer: answer });
-    if (history.length > 50) history.pop();
-    localStorage.setItem('study_ai_history', JSON.stringify(history));
-  }
-
-  function renderHistory() {
-    var history = JSON.parse(localStorage.getItem('study_ai_history') || '[]');
-    historyList.textContent = '';
-    if (!history.length) {
-      historyList.innerHTML = '<p class="status" style="text-align:center; margin-top: 24px;">История пуста</p>';
-      return;
-    }
-    history.forEach(function(item) {
-      var d = new Date(item.date);
-      var dateStr = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-      var card = document.createElement('div');
-      card.className = 'card history-item';
-      card.innerHTML = 
-        '<button class="history-del" data-id="'+item.id+'" aria-label="Удалить"><svg class="icon"><use href="#i-trash"/></svg></button>' +
-        '<div class="history-date">' + dateStr + '</div>' +
-        '<div class="history-task">' + item.text + '</div>' +
-        '<div class="history-answer">' + (item.answer || '—') + '</div>';
-      historyList.appendChild(card);
-    });
-  }
-
-  historyList.addEventListener('click', function(e) {
-    var delBtn = e.target.closest('.history-del');
-    if (delBtn) {
-      var id = Number(delBtn.dataset.id);
-      var history = JSON.parse(localStorage.getItem('study_ai_history') || '[]');
-      history = history.filter(function(h) { return h.id !== id; });
-      localStorage.setItem('study_ai_history', JSON.stringify(history));
-      renderHistory();
-    }
-  });
-
-  document.getElementById('btn-clear-history').addEventListener('click', function() {
-    if (confirm('Очистить историю?')) {
-      localStorage.removeItem('study_ai_history');
-      renderHistory();
-    }
-  });
-
-
-  /* ================= E2: Input Layer ================= */
-  var MAX_PHOTOS = 20, MAX_SIDE = 1600, QUALITY = 0.85, HOLD_MS = 250;
-  var photos = [];          
-  var nextId = 1, busy = false;
-  var $ = function (id) { return document.getElementById(id); };
-  var grid = $('home-previews'), zone = $('home-dropzone');
-  var btnCamera = $('btn-camera'), btnUpload = $('btn-upload');
-  var inCamera = $('input-camera'), inUpload = $('input-upload');
-
-  function isImage(file) { return /^image\//.test(file.type) || /\.(heic|heif|jpe?g|png|webp)$/i.test(file.name || ''); }
-  function loadImage(file) {
-    return new Promise(function (resolve, reject) {
-      var url = URL.createObjectURL(file), img = new Image();
-      img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
-      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('decode')); };
-      img.src = url;
-    });
-  }
-  async function compress(file) {
-    var src;
-    try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
-    catch (e) { src = await loadImage(file); }
-    var w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
-    var k = Math.min(1, MAX_SIDE / Math.max(w, h));
-    var canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(w * k));
-    canvas.height = Math.max(1, Math.round(h * k));
-    var ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
-    if (src.close) src.close();
-    var blob = await new Promise(function (res) { canvas.toBlob(res, 'image/jpeg', QUALITY); });
-    canvas.width = canvas.height = 0;   
-    if (!blob) throw new Error('encode');
-    return blob;
-  }
-  function formatMB(bytes) { var mb = bytes / 1048576; return mb < 0.1 ? '<0,1' : mb.toFixed(1).replace('.', ','); }
-
-  function render() {
-    grid.textContent = '';
-    photos.forEach(function (p, i) {
-      var li = document.createElement('li'); li.className = 'tile'; li.dataset.id = p.id;
-      var img = document.createElement('img'); img.src = p.url; img.alt = 'Фото ' + (i + 1); img.draggable = false;
-      var num = document.createElement('span'); num.className = 'tile-num'; num.textContent = i + 1;
-      var del = document.createElement('button'); del.type = 'button'; del.className = 'tile-del';
-      del.setAttribute('aria-label', 'Удалить фото ' + (i + 1));
-      del.innerHTML = '<span><svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></span>';
-      li.append(img, num, del); grid.appendChild(li);
-    });
-    var total = photos.reduce(function (s, p) { return s + p.blob.size; }, 0);
-    var has = photos.length > 0;
-    $('home-meta').hidden = !has; $('btn-recognize').hidden = !has;
-    $('photo-summary').textContent = photos.length + ' фото, ~' + formatMB(total) + ' МБ';
-    var full = photos.length >= MAX_PHOTOS;
-    btnCamera.disabled = btnUpload.disabled = full || busy;
-    $('btn-clear').disabled = busy;
-    var rb = $('btn-recognize'); rb.disabled = busy;
-    var pending = photos.some(function (p) { return !p.ocr; });
-    rb.textContent = ocrFailed ? 'Повторить распознавание' : (pending ? 'Распознать текст' : 'К проверке текста');
-    renderReview();
-  }
-  function setProgress(done, total) {
-    var on = total > 0;
-    $('home-progress').hidden = !on; $('home-status').hidden = !on;
-    if (on) {
-      $('progress-bar').style.width = Math.round(done / total * 100) + '%';
-      $('home-status').textContent = 'Обработка фото ' + Math.min(done + 1, total) + '/' + total;
-    }
-  }
-  async function addFiles(fileList) {
-    if (busy) return;
-    var files = Array.prototype.filter.call(fileList || [], isImage);
-    if (!files.length) { if (fileList && fileList.length) toast('Выберите изображения'); return; }
-    var slots = MAX_PHOTOS - photos.length;
-    if (slots <= 0) { toast('Максимум ' + MAX_PHOTOS + ' фото'); return; }
-    if (files.length > slots) { toast('Добавлено ' + slots + ' из ' + files.length + ': максимум ' + MAX_PHOTOS + ' фото'); files = files.slice(0, slots); }
-    busy = true; render();
-    var failed = 0;
-    for (var i = 0; i < files.length; i++) {      
-      setProgress(i, files.length);
-      try {
-        var blob = await compress(files[i]);
-        photos.push({ id: String(nextId++), blob: blob, url: URL.createObjectURL(blob) });
-        render();
-      } catch (e) { failed++; }
-    }
-    busy = false; setProgress(0, 0);
-    if (photos.length) setState('PHOTOS_ADDED');
-    render();
-    if (failed) toast('Не удалось обработать фото: ' + failed);
-  }
-  function removePhoto(id) {
-    if (busy) return;
-    var i = photos.findIndex(function (p) { return p.id === id; });
-    if (i < 0) return;
-    URL.revokeObjectURL(photos[i].url); photos.splice(i, 1); render();
-  }
-  function clearPhotos() {
-    if (busy) return;
-    ocrFailed = false;
-    photos.forEach(function (p) { URL.revokeObjectURL(p.url); });
-    photos = []; render(); solutions = [];
-    if ($('solution-steps')) $('solution-steps').textContent = '';
-  }
-
-  btnCamera.addEventListener('click', function () { inCamera.click(); });
-  btnUpload.addEventListener('click', function () { inUpload.click(); });
-  [inCamera, inUpload].forEach(function (inp) {
-    inp.addEventListener('change', function () {
-      var files = Array.prototype.slice.call(inp.files);
-      inp.value = ''; addFiles(files);
-    });
-  });
-  $('btn-clear').addEventListener('click', clearPhotos);
-  ['dragover', 'drop'].forEach(function (t) { window.addEventListener(t, function (e) { e.preventDefault(); }); });
-  zone.addEventListener('dragover', function () { zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', function () { zone.classList.remove('dragover'); });
-  zone.addEventListener('drop', function (e) {
-    zone.classList.remove('dragover');
-    if (e.dataTransfer && e.dataTransfer.files) addFiles(Array.prototype.slice.call(e.dataTransfer.files));
-  });
-  grid.addEventListener('click', function (e) {
-    var del = e.target.closest('.tile-del');
-    if (del) removePhoto(del.closest('.tile').dataset.id);
-  });
-
-  var drag = null, holdTimer = null;
-  function tileAt(x, y, except) {
-    var tiles = grid.querySelectorAll('.tile');
-    for (var i = 0; i < tiles.length; i++) {
-      if (tiles[i] === except) continue;
-      var r = tiles[i].getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return tiles[i];
-    }
-    return null;
-  }
-  function clearMarks() { grid.querySelectorAll('.drop-target').forEach(function (t) { t.classList.remove('drop-target'); }); }
-  function endDrag(commit, x, y) {
-    clearTimeout(holdTimer);
-    if (!drag) return;
-    var d = drag; drag = null;
-    clearMarks(); d.tile.classList.remove('dragging'); d.tile.style.transform = '';
-    if (commit && d.active) {
-      var target = tileAt(x, y, d.tile);
-      if (target) {
-        var from = photos.findIndex(function (p) { return p.id === d.tile.dataset.id; });
-        var to = photos.findIndex(function (p) { return p.id === target.dataset.id; });
-        if (from > -1 && to > -1 && from !== to) photos.splice(to, 0, photos.splice(from, 1)[0]);
-      }
-      render();
-    }
-  }
-  grid.addEventListener('pointerdown', function (e) {
-    var tile = e.target.closest('.tile');
-    if (!tile || e.target.closest('.tile-del') || drag || busy) return;
-    drag = { tile: tile, sx: e.clientX, sy: e.clientY, pid: e.pointerId, active: false };
-    holdTimer = setTimeout(function () {
-      if (!drag) return;
-      drag.active = true; tile.classList.add('dragging');
-      try { tile.setPointerCapture(drag.pid); } catch (err) { }
-      if (navigator.vibrate) navigator.vibrate(10);
-    }, HOLD_MS);
-  });
-  grid.addEventListener('pointermove', function (e) {
-    if (!drag) return;
-    var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
-    if (!drag.active) { if (Math.abs(dx) > 8 || Math.abs(dy) > 8) endDrag(false); return; }
-    drag.tile.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.04)';
-    clearMarks();
-    var t = tileAt(e.clientX, e.clientY, drag.tile);
-    if (t) t.classList.add('drop-target');
-  });
-  grid.addEventListener('pointerup', function (e) { endDrag(true, e.clientX, e.clientY); });
-  grid.addEventListener('pointercancel', function () { endDrag(false); });
-  document.addEventListener('touchmove', function (e) {
-    if (drag && drag.active && e.cancelable) e.preventDefault();   
-  }, { passive: false });
-  grid.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-
-  /* ================= E3: OCR Layer ================= */
-  var TESS_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
-  var OCR_LANG = 'rus+eng';       
-  var LOW_CONF = 0.7;
-  var state = 'IDLE';             
-  var worker = null, ocrLogger = null, reviewIdx = 0, ocrFailed = false;
-
-  function binarize(gray, w, h) {   
-    var hist = new Uint32Array(256), n = w * h, i, t, x, y;
-    for (i = 0; i < n; i++) hist[gray[i] | 0]++;
-    var sumAll = 0;
-    for (t = 0; t < 256; t++) sumAll += t * hist[t];
-    var wB = 0, sumB = 0, best = -1, thr = 127;
-    for (t = 0; t < 256; t++) {
-      wB += hist[t]; if (!wB) continue;
-      var wF = n - wB; if (!wF) break;
-      sumB += t * hist[t];
-      var mB = sumB / wB, mF = (sumAll - sumB) / wF, between = wB * wF * (mB - mF) * (mB - mF);
-      if (between > best) { best = between; thr = t; }
-    }
-    var bin = new Uint8Array(n);
-    for (i = 0; i < n; i++) bin[i] = gray[i] > thr ? 0 : 1;   
-    var med = new Uint8Array(n);                                
-    for (y = 0; y < h; y++) {
-      var ya = Math.max(0, y - 1), yb = Math.min(h - 1, y + 1);
-      for (x = 0; x < w; x++) {
-        var xa = Math.max(0, x - 1), xb = Math.min(w - 1, x + 1), c = 0, tot = 0;
-        for (var yy = ya; yy <= yb; yy++) for (var xx = xa; xx <= xb; xx++) { c += bin[yy * w + xx]; tot++; }
-        med[y * w + x] = c * 2 > tot ? 1 : 0;
-      }
-    }
-    return { bin: bin, med: med };   
-  }
-  function findBars(dark, w, h) {   
-    var minLen = Math.max(24, Math.round(w * 0.02)), maxThick = Math.max(4, Math.round(h * 0.01));
-    var open = [], done = [], y, x;
-    for (y = 0; y < h; y++) {
-      var runs = [];
-      x = 0;
-      while (x < w) {
-        if (dark[y * w + x]) {
-          var st = x;
-          while (x < w && dark[y * w + x]) x++;
-          if (x - st >= minLen) runs.push([st, x - 1]);
-        } else x++;
-      }
-      var next = [];
-      runs.forEach(function (r) {
-        var m = null;
-        for (var i = 0; i < open.length; i++) {
-          var b = open[i];
-          if (b.y1 === y - 1 && Math.min(b.x1, r[1]) - Math.max(b.x0, r[0]) > 0.7 * Math.min(b.x1 - b.x0, r[1] - r[0])) { m = b; open.splice(i, 1); break; }
-        }
-        if (m) { m.y1 = y; m.x0 = Math.min(m.x0, r[0]); m.x1 = Math.max(m.x1, r[1]); next.push(m); }
-        else next.push({ x0: r[0], x1: r[1], y0: y, y1: y });
+  function loadScript(src, id) {
+    if (window[id]) return Promise.resolve(window[id]);
+    const existing = document.querySelector(`script[data-study-ai-library="${id}"]`);
+    if (existing) {
+      return new Promise((resolve, reject) => {
+        existing.addEventListener('load', () => resolve(window[id]), { once: true });
+        existing.addEventListener('error', () => reject(new Error(`Не удалось загрузить ${id}`)), { once: true });
       });
-      open.forEach(function (b) { done.push(b); });
-      open = next;
     }
-    open.forEach(function (b) { done.push(b); });
-    return done.filter(function (b) { return b.y1 - b.y0 + 1 <= maxThick; });
-  }
-  function getWords(data) {
-    if (data.words && data.words.length) return data.words;
-    var out = [];
-    (data.blocks || []).forEach(function (b) { (b.paragraphs || []).forEach(function (p) { (p.lines || []).forEach(function (l) { (l.words || []).forEach(function (w) { out.push(w); }); }); }); });
-    return out;
-  }
-  function buildText(rawWords, bars) {
-    var ws = rawWords.filter(function (w) { return w && w.bbox && String(w.text || '').trim(); }).map(function (w) {
-      return { t: String(w.text).trim(), x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1, used: false };
+
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.dataset.studyAiLibrary = id;
+      script.onload = () => window[id] ? resolve(window[id]) : reject(new Error(`Библиотека ${id} недоступна`));
+      script.onerror = () => reject(new Error(`Не удалось загрузить ${id}`));
+      document.head.appendChild(script);
     });
-    if (!ws.length) return { text: '', fracs: 0 };
-    ws.forEach(function (w) { w.cx = (w.x0 + w.x1) / 2; w.cy = (w.y0 + w.y1) / 2; w.h = w.y1 - w.y0; });
-    var hs = ws.map(function (w) { return w.h; }).sort(function (a, b) { return a - b; });
-    var medH = hs[Math.floor(hs.length / 2)] || 10;
-    var byX = function (a, b) { return a.x0 - b.x0; };
-    var fracs = [];
-    bars.forEach(function (bar) {
-      var up = [], dn = [], bc = (bar.y0 + bar.y1) / 2;
-      ws.forEach(function (w) {
-        if (w.used || w.cx < bar.x0 - 4 || w.cx > bar.x1 + 4) return;
-        var gu = bar.y0 - w.y1, gd = w.y0 - bar.y1;
-        if (gu >= -w.h * 0.25 && gu <= medH * 1.2) up.push(w);
-        else if (gd >= -w.h * 0.25 && gd <= medH * 1.2) dn.push(w);
+  }
+
+  function ensureNerdamer() {
+    if (window.nerdamer) return Promise.resolve(window.nerdamer);
+    if (!state.nerdamerPromise) {
+      state.nerdamerPromise = loadScript(CDN.nerdamer, 'nerdamer').catch((error) => {
+        state.nerdamerPromise = null;
+        throw error;
       });
-      if (!up.length || !dn.length) return;
-      var all = up.concat(dn);
-      var mx0 = Math.min.apply(null, all.map(function (w) { return w.x0; }));
-      var mx1 = Math.max.apply(null, all.map(function (w) { return w.x1; }));
-      var tw = mx1 - mx0, bw = bar.x1 - bar.x0;
-      if (bw > tw * 1.35 + 20 || bw < tw * 0.55) return;   
-      up.sort(byX); dn.sort(byX);
-      all.forEach(function (w) { w.used = true; });
-      ws.forEach(function (w) {   
-        if (!w.used && /^[-—–_=~.|]+$/.test(w.t) && Math.abs(w.cy - bc) <= medH * 0.6 && w.cx >= bar.x0 - 4 && w.cx <= bar.x1 + 4) w.used = true;
-      });
-      fracs.push({
-        t: '(' + up.map(function (w) { return w.t; }).join(' ') + ')/(' + dn.map(function (w) { return w.t; }).join(' ') + ')',
-        x0: bar.x0, x1: bar.x1, cx: (bar.x0 + bar.x1) / 2, cy: bc, h: medH
-      });
-    });
-    var items = ws.filter(function (w) { return !w.used; }).concat(fracs).sort(function (a, b) { return a.cy - b.cy; });
-    var lines = [];
-    items.forEach(function (it) {
-      var L = lines[lines.length - 1];
-      if (L && Math.abs(it.cy - L.cy) <= medH * 0.7) { L.items.push(it); L.cy = (L.cy * (L.items.length - 1) + it.cy) / L.items.length; }
-      else lines.push({ cy: it.cy, items: [it] });
-    });
-    var text = '';
-    lines.forEach(function (L, i) {
-      if (i) text += (L.cy - lines[i - 1].cy > medH * 5 ? '\n\n' : '\n');
-      text += L.items.sort(byX).map(function (w) { return w.t; }).join(' ');
-    });
-    return { text: text, fracs: fracs.length };
-  }
-  async function preprocess(blob) {   
-    var bmp = await createImageBitmap(blob);
-    var k = Math.min(3, Math.max(1, 1800 / Math.max(bmp.width, bmp.height)));
-    var w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
-    var c = document.createElement('canvas'); c.width = w; c.height = h;
-    var ctx = c.getContext('2d', { willReadFrequently: true });
-    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(bmp, 0, 0, w, h);
-    if (bmp.close) bmp.close();
-    var img = ctx.getImageData(0, 0, w, h), d = img.data, n = w * h, gray = new Uint8ClampedArray(n), sum = 0, i;
-    for (i = 0; i < n; i++) { var g = (d[4 * i] * 299 + d[4 * i + 1] * 587 + d[4 * i + 2] * 114) / 1000; gray[i] = g; sum += g; }
-    if (sum / n < 110) for (i = 0; i < n; i++) gray[i] = 255 - gray[i];   
-    var bz = binarize(gray, w, h), dark = bz.bin;
-    for (i = 0; i < n; i++) { var v = bz.med[i] ? 0 : 255; d[4 * i] = d[4 * i + 1] = d[4 * i + 2] = v; d[4 * i + 3] = 255; }
-    ctx.putImageData(img, 0, 0);
-    var out = await new Promise(function (res) { c.toBlob(res, 'image/png', 1.0); });
-    c.width = c.height = 0;
-    if (!out) throw new Error('png');
-    return { blob: out, dark: dark, w: w, h: h };
-  }
-  function setState(s) { state = s; document.body.dataset.state = s; }
-  function loadScript(src) {
-    return new Promise(function (resolve, reject) {
-      if (window.Tesseract) return resolve();
-      var s = document.createElement('script');
-      s.src = src; s.onload = resolve; s.onerror = function () { reject(new Error('script')); };
-      document.head.appendChild(s);
-    });
-  }
-  async function killWorker() { if (!worker) return; try { await worker.terminate(); } catch (e) { } worker = null; }
-  function ocrProgress(frac, text, loading) {
-    $('home-progress').hidden = false;
-    $('home-progress').classList.toggle('loading', !!loading);
-    $('progress-bar').style.width = Math.round(frac * 100) + '%';
-    $('home-status').hidden = false; $('home-status').textContent = text;
-  }
-  async function runOcr() {
-    if (busy || !photos.length) return;
-    var todo = photos.filter(function (p) { return !p.ocr; });
-    if (!todo.length) { goReview(); return; }
-    busy = true; ocrFailed = false; setState('OCR_PROCESSING'); render();
-    ocrProgress(0, 'Загрузка модели распознавания…', true);
-    try {
-      await loadScript(TESS_URL);
-      ocrLogger = function (m) {
-        if (m.status && m.status.indexOf('loading') === 0) {
-          ocrProgress(0, 'Загрузка языка ' + Math.round((m.progress || 0) * 100) + '%', true);
-        }
-      };
-      worker = await Tesseract.createWorker(OCR_LANG, 1, {
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
-        langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-        logger: function (m) { if (ocrLogger) ocrLogger(m); }
-      });
-      try { await worker.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1', user_defined_dpi: '300' }); } catch (e3) { }
-    } catch (e) {
-      await killWorker(); busy = false; ocrFailed = true; setState('PHOTOS_ADDED');
-      $('home-progress').hidden = true; $('home-status').hidden = true; render();
-      toast('Нет интернета. Подключитесь один раз для загрузки'); return;
     }
-    var failed = 0, done = 0;
-    for (var k = 0; k < todo.length; k++) {      
-      var p = todo[k], idx = photos.indexOf(p) + 1;
-      ocrLogger = (function (doneNow, idxNow) {
-        return function (m) {
-          if (m.status === 'recognizing text') {
-            var pr = m.progress || 0;
-            ocrProgress((doneNow + pr) / todo.length, 'Фото ' + idxNow + '/' + photos.length + ' — распознавание ' + Math.round(pr * 100) + '%', false);
-          }
-        };
-      })(done, idx);
-      ocrProgress(done / todo.length, 'Фото ' + idx + '/' + photos.length + ' — распознавание 0%', false);
-      try {
-        var pre = null;
-        try { pre = await preprocess(p.blob); } catch (e4) { pre = null; }
-        var res = await worker.recognize(pre ? pre.blob : p.blob, {}, { text: true, blocks: true });
-        var txt = (res.data.text || '').trim();
-        if (pre) {
-          try {   
-            var rb = buildText(getWords(res.data), findBars(pre.dark, pre.w, pre.h));
-            if (rb.fracs > 0 && rb.text) txt = rb.text;
-          } catch (e5) { }
-          pre = null;
-        }
-        p.ocr = { text: txt, confidence: (res.data.confidence || 0) / 100 };
-      } catch (e) { failed++; }
-      done++;
-    }
-    ocrLogger = null; await killWorker(); busy = false;
-    $('home-progress').hidden = true; $('home-progress').classList.remove('loading'); $('home-status').hidden = true;
-    if (failed) { ocrFailed = true; setState('PHOTOS_ADDED'); render(); toast('Не удалось распознать фото: ' + failed); return; }
-    goReview();
+    return state.nerdamerPromise;
   }
-  function goReview() { setState('OCR_REVIEW'); reviewIdx = 0; render(); showScreen('ocr-review'); }
-  function renderReview() {
-    var n = photos.length;
-    if (reviewIdx >= n) reviewIdx = Math.max(0, n - 1);
-    var p = photos[reviewIdx];
-    var ta = $('ocr-text'), frame = $('ocr-photo');
-    $('ocr-pager').hidden = n < 2;
-    $('ocr-page-label').textContent = 'Фото ' + (reviewIdx + 1) + ' из ' + n;
-    $('ocr-prev').disabled = reviewIdx <= 0;
-    $('ocr-next').disabled = reviewIdx >= n - 1;
-    frame.textContent = '';
-    var low = [];
-    photos.forEach(function (ph, i) { if (ph.ocr && ph.ocr.confidence < LOW_CONF) low.push(i + 1); });
-    var warn = $('ocr-warning');
-    warn.hidden = !low.length;
-    if (low.length) warn.textContent = 'Низкая уверенность распознавания: фото ' + low.join(', ') + '. Проверьте и поправьте текст перед решением. Возможно, OCR ошибся. Частые путаницы: 0↔O, 1↔l, x↔×, 5↔S, 2↔Z.';
-    var conf = $('ocr-conf');
-    if (!p) { ta.value = ''; ta.disabled = true; ta.classList.remove('low'); conf.textContent = ''; conf.className = 'status'; }
-    else {
-      var img = document.createElement('img'); img.src = p.url; img.alt = 'Фото ' + (reviewIdx + 1);
-      frame.appendChild(img);
-      ta.disabled = !p.ocr;
-      if (document.activeElement !== ta) ta.value = p.ocr ? p.ocr.text : '';
-      var isLow = !!(p.ocr && p.ocr.confidence < LOW_CONF);
-      ta.classList.toggle('low', isLow);
-      conf.className = 'status' + (isLow ? ' low' : '');
-      conf.textContent = p.ocr ? 'Уверенность распознавания: ' + Math.round(p.ocr.confidence * 100) + '%' : '';
-    }
-    var any = photos.some(function (ph) { return ph.ocr && ph.ocr.text.trim(); });
-    $('btn-solve').disabled = !any;
-  }
-  function getOcrResults() {
-    return photos.filter(function (p) { return p.ocr; }).map(function (p) {
-      return { photoIndex: photos.indexOf(p), text: p.ocr.text, confidence: p.ocr.confidence };
-    });
-  }
-  $('btn-recognize').addEventListener('click', runOcr);
-  $('ocr-prev').addEventListener('click', function () { if (reviewIdx > 0) { reviewIdx--; renderReview(); $('content').scrollTop = 0; } });
-  $('ocr-next').addEventListener('click', function () { if (reviewIdx < photos.length - 1) { reviewIdx++; renderReview(); $('content').scrollTop = 0; } });
-  $('ocr-text').addEventListener('input', function () {
-    var p = photos[reviewIdx];
-    if (p && p.ocr) { p.ocr.text = this.value; p.ocr.edited = true; $('btn-solve').disabled = !photos.some(function (ph) { return ph.ocr && ph.ocr.text.trim(); }); }
-  });
-  $('btn-ocr-back').addEventListener('click', function () { showScreen('home'); });
-  $('btn-solve').addEventListener('click', function () { runSolve(); });
 
-  /* ================= E4: Solver ================= */
-  var solutions = [], solving = false, nerdamerReady = false;
-  var NERD_BASE = 'https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/';
-  var FUNCS = /\b(sin|cos|tan|cot|asin|acos|atan|log|sqrt|exp|pi|abs|defint|integrate|diff|simplify|factor|expand)\b/g;
+  function showToast(message, duration = 3200) {
+    if (!elements.toast) return;
+    elements.toast.textContent = message;
+    elements.toast.classList.add('show');
+    clearTimeout(state.toastTimer);
+    state.toastTimer = setTimeout(() => elements.toast.classList.remove('show'), duration);
+  }
 
-  function normalize(s) {
-    return String(s)
-      .replace(/[−–—]/g, '-').replace(/-{2,}/g, '-').replace(/[×·⋅]/g, '*').replace(/÷/g, '/')
-      .replace(/²/g, '^2').replace(/³/g, '^3').replace(/π/g, 'pi')
-      .replace(/√\s*\(([^)]*)\)/g, 'sqrt($1)').replace(/√\s*([A-Za-z0-9.]+)/g, 'sqrt($1)')
-      .replace(/(\d),(\d)/g, '$1.$2')
-      .replace(/\barc(sin|cos|tan)\b/gi, 'a$1').replace(/\barctg\b/gi, 'atan')
-      .replace(/\btg\b/gi, 'tan').replace(/\bctg\b/gi, 'cot').replace(/\bln\b/gi, 'log')
-      .replace(/\b(sin|cos|tan|cot|asin|acos|atan|log|sqrt|exp)\s+([A-Za-z0-9.]+(?:\^[0-9.]+)?)/gi, '$1($2)')
-      .replace(/([0-9a-z)])\s+(sin|cos|tan|cot|asin|acos|atan|log|sqrt|exp)\(/gi, '$1*$2(');
+  function setStatus(message, visible = true) {
+    if (!elements.homeStatus) return;
+    elements.homeStatus.textContent = message;
+    elements.homeStatus.hidden = !visible;
   }
-  function cleanMath(n) {
-    n = n.replace(/\)\s*([23])(?![\d.])/g, function (m, d, off, str) {
-      var ls = str.lastIndexOf('\n', off) + 1;
-      return /^\s*\S{1,2}$/.test(str.slice(ls, off)) ? m : ')^' + d;
-    });
-    n = n.replace(/(\d)([a-zA-Z])[?*](?=\s|$|[-+−—)\/])/g, '$1$2^2')
-         .replace(/([\s(])([a-zA-Z])[?*](?=\s*[-+−—)\/=])/g, '$1$2^2');
-    var CYR = { 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x', 'у': 'y', 'к': 'k', 'м': 'm', 'т': 't', 'в': 'b', 'н': 'h', 'Х': 'x', 'У': 'y' };
-    n = n.replace(/(^|[^А-Яа-яЁё])[зЗ](?=[^А-Яа-яЁё]|$)/g, function (m, pre) { return pre + '3'; })
-         .replace(/(^|[^А-Яа-яЁё])[зЗ](?=[a-zA-Zаеорсхукмтвн]\s*(?:[-+*\/^=)]|$))/g, function (m, pre) { return pre + '3'; });
-    var s = n.replace(/[А-Яа-яЁё]{2,}/g, ' ')
-      .replace(/[аеорсхукмтвнХУ]/g, function (ch, off, str) {
-        if (ch === 'х' || ch === 'Х' || ch === 'у' || ch === 'У') return CYR[ch];
-        var glued = /[\dA-Za-z+\-*\/^=()]/;
-        return (glued.test(str[off - 1] || ' ') || glued.test(str[off + 1] || ' ')) ? CYR[ch] : ch;
-      })
-      .replace(/[А-Яа-яЁё]/g, ' ').replace(/[?!№]+/g, ' ').replace(/\s+/g, ' ')
-      .replace(/^[\s.,;:]+|[\s.,;:]+$/g, '').trim();
-    if (!/(^|[^a-zA-Z])[a-zA-Z]1(?![\w.])/.test(s)) s = s.replace(/(^|[^a-zA-Z])([a-zA-Z])([23])(?![\w.(])/g, '$1$2^$3');
-    return s;
-  }
-  function detectVar(e) {
-    var t = e.replace(FUNCS, ' '), set = {}, i;
-    (t.match(/[a-zA-Z]/g) || []).forEach(function (c) { set[c] = 1; });
-    if (set.x) return 'x';
-    var keys = Object.keys(set).filter(function (c) { return c !== 'e' && c !== 'i'; });
-    return keys[0] || null;
-  }
-  function parseChoices(text) {
-    var lines = String(text).split('\n').map(function (l) { return l.trim(); })
-      .filter(function (l) { return l && !(l.length <= 2 && !/[A-Za-z0-9А-Яа-я]/.test(l)); });
-    var strict = /^([A-Ea-eАВСЕавсе])\s*[)\].:]\s*(.*)$/, loose = /^(?:(\S{1,2})\s*[)\]]|([A-E])\s+(?=\())\s*(\S.*)$/, frac = /^\S{0,2}\s*\(.+\)\/\(.+\)$/, fx = function (l) { return l.slice(l.indexOf('(')); };
-    var map = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'а': 'A', 'в': 'B', 'с': 'C', 'е': 'E' };
-    var ABC = 'ABCDEFG', stem = [], opts = [], m;
-    lines.forEach(function (l) {
-      if ((m = strict.exec(l))) opts.push({ label: map[m[1]] || m[1].toUpperCase(), text: m[2] });
-      else if (opts.length && frac.test(l)) opts.push({ label: ABC[ABC.indexOf(opts[opts.length - 1].label) + 1] || '?', text: fx(l) });
-      else if (opts.length) opts[opts.length - 1].text += ' ' + l;
-      else stem.push(l);
-    });
-    if (opts.length >= 2 && opts[0].label === 'A') return { stem: stem.join(' '), options: opts };
-    var first = -1, i;
-    for (i = 1; i < lines.length; i++) if (loose.test(lines[i])) { first = i; break; }
-    if (first < 0) return null;
-    opts = [];
-    lines.slice(first).forEach(function (l) {
-      if ((m = loose.exec(l))) opts.push({ text: m[3], sl: (strict.test(l) || m[2]) ? (map[l[0]] || l[0].toUpperCase()) : null });
-      else if (frac.test(l)) opts.push({ text: fx(l), sl: null });
-      else if (opts.length) opts[opts.length - 1].text += ' ' + l;
-    });
-    if (opts.length < 3) return null;
-    var offset = 0;
-    for (i = 0; i < opts.length; i++) if (opts[i].sl) { offset = Math.max(0, ABC.indexOf(opts[i].sl) - i); break; }
-    return { stem: lines.slice(0, first).join(' '), options: opts.map(function (o, k) { return { label: ABC[k + offset], text: o.text }; }) };
-  }
-  function splitProblems(text) {
-    var out = [], blocks = [];
-    var head = /^(задани[ея]|задач[аи]|упражнени[ея]|вопрос|№)\s*\d*\s*[.:)]?\s*$/i;
-    var optStart = /^[AАaа]\s*[)\].:]/, optAny = /(^|\n)[AАaа]\s*[)\].:]/;
-    String(text).split(/\n\s*\n/).forEach(function (b) {
-      var lines = b.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l && !head.test(l); });
-      if (!lines.length) return;
-      var prev = blocks[blocks.length - 1];
-      if (prev && optStart.test(lines[0]) && !optAny.test(prev.join('\n'))) blocks[blocks.length - 1] = prev.concat(lines);
-      else blocks.push(lines);
-    });
-    var num = /^\d+[.)]\s*/;
-    blocks.forEach(function (lines) {
-      if (parseChoices(lines.join('\n'))) { out.push(lines.join('\n').replace(num, '')); return; }
-      var numbered = lines.filter(function (l) { return num.test(l); }).length;
-      if (numbered >= 2) {
-        var cur = null;
-        lines.forEach(function (l) {
-          if (num.test(l)) { if (cur) out.push(cur); cur = l.replace(num, ''); }
-          else if (cur !== null) cur += ' ' + l;
-        });
-        if (cur) out.push(cur);
-      } else { out.push(lines.join('\n').replace(num, '')); }
-    });
-    return out.filter(function (t) { return t.trim(); });
-  }
-  function route(t) {
-    if (/[∫∑√]|\b(sin|cos|tan|tg|ctg|cot|log|ln)\b|производн|интеграл|\^|[²³]/i.test(t)) return 'math';
-    if (/[₀-₉]|моль|реакци|кислот|оксид|щ[её]лоч|электролит|\b(H2O|NaOH|HCl|H2SO4|CO2|O2|H2|N2|NaCl)\b/i.test(t)) return 'chem';
-    if (/треугольник|окружност|площад|периметр|радиус|параллелограмм|трапеци|диагонал|гипотенуз/i.test(t)) return 'geom';
-    if (/=|\d/.test(t)) return 'math';
-    return 'unknown';
-  }
-  function splitTop(s) {
-    var out = [], depth = 0, cur = '';
-    for (var i = 0; i < s.length; i++) {
-      var c = s[i];
-      if (c === '(' || c === '[') depth++;
-      if (c === ')' || c === ']') depth--;
-      if (c === ',' && depth === 0) { out.push(cur.trim()); cur = ''; } else cur += c;
-    }
-    if (cur.trim()) out.push(cur.trim());
-    return out.filter(Boolean);
-  }
-  function pretty(s) {
-    return String(s).replace(/\*/g, '·').replace(/sqrt\(([^()]*)\)/g, '√($1)').replace(/\bpi\b/g, 'π').replace(/\blog\(/g, 'ln(');
-  }
-  function isComplex(s) { return /(^|[^a-z])i([^a-z]|$)/.test(s); }
 
-  function addScript(src) {
-    return new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      s.src = src; s.onload = resolve; s.onerror = function () { reject(new Error('script')); };
-      document.head.appendChild(s);
+  function setProgress(value, message = '') {
+    const normalized = Math.max(0, Math.min(100, Number(value) || 0));
+    if (elements.homeProgress) elements.homeProgress.hidden = normalized <= 0 || normalized >= 100;
+    if (elements.progressBar) elements.progressBar.style.width = `${normalized}%`;
+    if (message) setStatus(message, true);
+  }
+
+  function navigate(screenName) {
+    const target = ['home', 'crop', 'ocr-review', 'solution', 'history', 'settings'].includes(screenName)
+      ? screenName
+      : 'home';
+
+    state.screen = target;
+    $$('.screen').forEach((screen) => {
+      const active = screen.id === `screen-${target}`;
+      screen.classList.toggle('active', active);
+      screen.setAttribute('aria-hidden', String(!active));
     });
-  }
-  async function loadNerdamer() {
-    if (nerdamerReady) return;
-    var files = ['nerdamer.core.js', 'Algebra.js', 'Calculus.js', 'Solve.js', 'Extra.js'];
-    for (var i = 0; i < files.length; i++) await addScript(NERD_BASE + files[i]);
-    nerdamerReady = true;
-  }
-  function dec(expr) {
-    try { var n = Number(nerdamer(expr).evaluate().text('decimals')); if (!isFinite(n)) return null; return String(+n.toFixed(6)); }
-    catch (e) { return null; }
-  }
-  function unsolved(str) { if (/\b(integrate|defint|diff)\(/.test(str)) throw new Error('unsolved'); return str; }
-  function solveIntegral(raw) {
-    var n = normalize(raw), a = null, b = null, m;
-    if ((m = /от\s*(-?[\w.]+(?:\/[\w.]+)?)\s*до\s*(-?[\w.]+(?:\/[\w.]+)?)/i.exec(n))) { a = m[1]; b = m[2]; n = n.replace(m[0], ' '); }
-    if ((m = /∫\s*_\s*\(?\s*(-?[\w.]+)\s*\)?\s*\^\s*\(?\s*(-?[\w.]+)\s*\)?/.exec(n))) { a = m[1]; b = m[2]; n = n.replace(m[0], '∫'); }
-    var e = cleanMath(n.replace(/∫/g, ' ')), v = null;
-    m = /(^|[^a-zA-Z])d([a-z])\s*$/.exec(e);
-    if (m) { v = m[2]; e = e.slice(0, m.index + m[1].length).trim(); }
-    v = v || detectVar(e) || 'x';
-    if (!e) throw new Error('empty');
-    if (a !== null) {
-      var r = nerdamer('defint(' + e + ',' + a + ',' + b + ',' + v + ')');
-      var s = unsolved(r.toString()), d = dec(s);
-      return { answer: pretty(s) + (d && d !== s ? ' ≈ ' + d : ''), kind: 'Определённый интеграл' };
-    }
-    var res = unsolved(nerdamer('integrate(' + e + ',' + v + ')').toString());
-    return { answer: pretty(res) + ' + C', kind: 'Неопределённый интеграл' };
-  }
-  function solveDerivative(raw) {
-    var e = cleanMath(normalize(raw));
-    e = e.replace(/d\s*\/\s*d[a-z]/g, ' ').replace(/\b[a-zA-Z]\s*'\s*(\(\s*[a-z]\s*\))?\s*=?/g, ' ').replace(/'/g, ' ').trim();
-    if (e.indexOf('=') > -1) e = e.slice(e.lastIndexOf('=') + 1).trim();
-    if (!e) throw new Error('empty');
-    var v = detectVar(e) || 'x';
-    return { answer: pretty(unsolved(nerdamer('diff(' + e + ',' + v + ')').toString())), kind: 'Производная' };
-  }
-  var SAMPLES = [0.37, 1.3, -2.1, 2.9, -0.73];
-  function val(e, v, x) {
-    try { var subs = {}; if (v) subs[v] = String(x); return Number(nerdamer(e, subs).evaluate().text('decimals')); }
-    catch (err) { return NaN; }
-  }
-  function sameValue(e1, e2, v) {
-    var pts = v ? SAMPLES : [0], ok = 0;
-    for (var i = 0; i < pts.length; i++) {
-      var a = val(e1, v, pts[i]), b = val(e2, v, pts[i]);
-      if (!isFinite(a) || !isFinite(b)) continue;
-      if (Math.abs(a - b) > 1e-6 * Math.max(1, Math.abs(a), Math.abs(b))) return false;
-      ok++;
-    }
-    return ok >= (v ? 3 : 1);
-  }
-  function solveExpression(raw, preClean) {
-    var e = preClean || cleanMath(normalize(raw));
-    e = e.replace(/=\s*$/, '').trim();
-    if (!e) throw new Error('empty');
-    var v = detectVar(e);
-    if (!v) {
-      var s = nerdamer(e).evaluate().toString(), d = dec(e);
-      return { answer: pretty(s) + (d && d !== s ? ' ≈ ' + d : ''), kind: 'Вычисление', verified: true };
-    }
-    var fn = /множител/i.test(raw) ? 'factor' : (/раскро|скобк/i.test(raw) ? 'expand' : 'simplify');
-    var res = nerdamer(fn + '(' + e + ')').toString();
-    var ok = sameValue(e, res, v);
-    return { answer: pretty(res), kind: 'Преобразование выражения', verified: ok, note: ok ? 'Проверено подстановкой.' : 'Не удалось проверить подстановкой.' };
-  }
-  function solveChoice(ch) {
-    var stem = cleanMath(normalize(ch.stem));
-    var opts = ch.options.map(function (o) { return { label: o.label, expr: cleanMath(normalize(o.text)) }; });
-    if (!stem) {
-      var parts = opts.map(function (o) {
-        try { return o.label + ') ' + mathSolve(o.expr).answer; } catch (e) { return o.label + ') не решено'; }
-      });
-      return { answer: parts.join('\n'), kind: 'Подпункты' };
-    }
-    var v = detectVar(stem) || detectVar(opts.map(function (o) { return o.expr; }).join(' '));
-    var base = null;
-    try { base = solveExpression(ch.stem); } catch (e) { base = null; }
-    var hits = opts.filter(function (o) { return o.expr && sameValue(stem, o.expr, v); });
-    var simple = base && base.verified ? ' Упрощённо: ' + base.answer : '';
-    if (hits.length) {
-      return { answer: hits.map(function (h) { return h.label + ') ' + pretty(h.expr); }).join('; '), kind: 'Тест с вариантами',
-        note: 'Вариант совпал с результатом (проверено подстановкой чисел).' + simple };
-    }
-    if (base && base.verified) return { answer: base.answer, kind: 'Тест с вариантами', note: 'Ни один вариант не совпал — проверьте текст вариантов.' };
-    throw new Error('choice');
-  }
-  function solveEquation(raw) {
-    var e = cleanMath(normalize(raw)).replace(/[{}]/g, '');
-    var parts = e.split('=');
-    if (parts.length !== 2) throw new Error('eq');
-    var lhs = parts[0].trim(), rhs = parts[1].trim();
-    if (!rhs) return solveExpression(raw, lhs);
-    var v = detectVar(e) || 'x';
-    var sol = nerdamer.solve(lhs + '=' + rhs, v).toString().replace(/^\[|\]$/g, '');
-    var items = splitTop(sol);
-    if (!items.length) {
-      try {
-        var idn = Number(nerdamer(lhs + ' - (' + rhs + ')').evaluate().text('decimals'));
-        if (isFinite(idn) && Math.abs(idn) < 1e-9) return { answer: v + ' — любое число', kind: 'Уравнение' };
-      } catch (e6) { }
-      return { answer: 'Действительных решений нет', kind: 'Уравнение' };
-    }
-    var bad = false;
-    var out = items.map(function (it) {
-      if (!isComplex(it)) {
-        try {
-          var chk = nerdamer('(' + lhs + ')-(' + rhs + ')', (function () { var o = {}; o[v] = it; return o; })()).evaluate().text('decimals');
-          var v2 = Number(chk); if (!isFinite(v2) || Math.abs(v2) > 1e-6) bad = true;
-        } catch (e2) { }
-      }
-      var d = isComplex(it) ? null : dec(it);
-      return v + ' = ' + pretty(it) + (d && d !== it ? ' ≈ ' + d : '');
+    $$('[data-nav]').forEach((button) => {
+      const active = button.dataset.nav === target;
+      button.setAttribute('aria-current', active ? 'page' : 'false');
     });
-    return { answer: out.join('; '), kind: 'Уравнение', note: bad ? 'Проверка подстановкой не сошлась — проверьте условие.' : 'Проверено подстановкой.' };
+    if (target === 'history') renderHistory();
+    if (target !== 'crop') stopCropInteraction();
+    if (elements.content) elements.content.scrollTop = 0;
   }
-  function solveSystem(lines) {
-    var eqs = lines.map(function (l) { return cleanMath(normalize(l)).replace(/[{}]/g, '').trim(); })
-      .filter(function (l) { return l.indexOf('=') > -1; });
-    var r = nerdamer.solveEquations(eqs);
-    if (!Array.isArray(r) || !r.length) throw new Error('system');
-    var out = r.map(function (p) { return Array.isArray(p) ? p[0] + ' = ' + pretty(String(p[1])) : String(p); });
-    return { answer: out.join('; '), kind: 'Система уравнений' };
+
+  function getSavedTheme() {
+    const value = localStorage.getItem(STORAGE_KEYS.theme);
+    return ['system', 'light', 'dark'].includes(value) ? value : 'system';
   }
-  function mathSolve(text) {
-    var ch = parseChoices(text);
-    if (ch) return solveChoice(ch);
-    var lines = text.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
-    if (/∫|интеграл/i.test(text)) return solveIntegral(text);
-    if (/производн|d\s*\/\s*d[a-z]|\)\s*'/i.test(text)) return solveDerivative(text);
-    var eqLines = lines.filter(function (l) { return /\S\s*=\s*\S/.test(l); });
-    if (eqLines.length >= 2) return solveSystem(eqLines);
-    if (text.indexOf('=') > -1) return solveEquation(text);
-    return solveExpression(text);
+
+  function applyTheme(value, persist = true) {
+    const theme = ['system', 'light', 'dark'].includes(value) ? value : 'system';
+    if (theme === 'system') elements.html.removeAttribute('data-theme');
+    else elements.html.setAttribute('data-theme', theme);
+    if (elements.themeSelect) elements.themeSelect.value = theme;
+    if (persist) localStorage.setItem(STORAGE_KEYS.theme, theme);
   }
-  function solveOne(pr) {
-    var kind = route(pr.text), base = { photoIndex: pr.photoIndex, text: pr.text, route: kind };
-    if (pr.text.trim().length < 3 || pr.confidence < 0.3) {
-      return Object.assign(base, { status: 'fail', kind: 'ocr', message: 'Не удалось прочитать фото. Переснимите при лучшем свете.' });
-    }
-    if (kind === 'chem') return Object.assign(base, { status: 'stub', message: 'Химия — скоро' });
-    if (kind === 'geom') return Object.assign(base, { status: 'stub', message: 'Геометрия — в следующей версии' });
-    if (kind === 'unknown') return Object.assign(base, { status: 'fail', kind: 'route', message: 'Текст распознан, но этот предмет пока не решаю.' });
-    try {
-      var r = mathSolve(pr.text);
-      if (!r.answer) throw new Error('empty');
-      return Object.assign(base, { status: 'ok', answer: r.answer, note: r.note || '', kindLabel: r.kind });
-    } catch (e) {
-      return Object.assign(base, { status: 'fail', kind: 'solve', message: 'Не смог решить — проверьте условие.' });
+
+  function toggleManualInput() {
+    const shouldShow = !elements.manualArea.classList.contains('show');
+    elements.manualArea.classList.toggle('show', shouldShow);
+    if (shouldShow) {
+      elements.mathInput.focus();
+      elements.manualArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }
 
-  var tick = function () { return new Promise(function (r) { setTimeout(r, 0); }); };
-  function renderSkeleton() {
-    $('solution-task').textContent = 'Решаю…';
-    $('solution-task').className = 'card summary';
-    var list = $('solution-steps'); list.textContent = '';
-    for (var i = 0; i < 2; i++) { var s = document.createElement('div'); s.className = 'skeleton'; list.appendChild(s); }
-  }
-  function el(tag, cls, text) {
-    var n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text !== undefined) n.textContent = text;
-    return n;
+  function insertAtCursor(text) {
+    const input = elements.mathInput;
+    const start = Number.isInteger(input.selectionStart) ? input.selectionStart : input.value.length;
+    const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
+    input.setRangeText(text, start, end, 'end');
+    input.focus();
   }
 
-  /* ================= KaTeX ================= */
-  var KATEX_JS_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js';
-  var KATEX_CSS_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css';
-  var katexFallbackTried = false, katexWait = null, katexStyled = false;
-
-  function latexify(str) {
-    if (!str) return '';
-    var s = String(str).trim().replace(/[−–—]/g, '-');
-    s = s.replace(/≈/g, ' \\approx ').replace(/±/g, ' \\pm ').replace(/≠/g, ' \\neq ');
-    s = s.replace(/(?:√|sqrt)\(([^()]*)\)/g, '\\sqrt{$1}').replace(/√\s*([A-Za-z0-9.]+)/g, '\\sqrt{$1}');
-    s = s.replace(/\bpi\b/g, 'π').replace(/π/g, '\\pi ');   
-    s = s.replace(/\b(asin|acos|atan|arcsin|arccos|arctan|sin|cos|tan|cot|log|ln)\(/g, function (m, f) {
-      var map = { asin: 'arcsin', acos: 'arccos', atan: 'arctan', log: 'ln' };
-      return '\\' + (map[f] || f) + '(';
-    });
-    s = s.replace(/\(([^()]*)\)\s*\/\s*\(([^()]*)\)/g, '\\frac{$1}{$2}');
-    s = s.replace(/\(([^()]*)\)\s*\/\s*(\d+(?:\.\d+)?|[A-Za-z])(?![A-Za-z0-9(])/g, '\\frac{$1}{$2}');
-    s = s.replace(/(\b[A-Za-z]\^\d+)\s*\/\s*(\d+)/g, '\\frac{$1}{$2}');                  
-    s = s.replace(/(\\pi)\s*\/\s*(\d+)/g, '\\frac{$1}{$2}');                             
-    s = s.replace(/(^|[^\^\d.{])(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g, '$1\\frac{$2}{$3}');   
-    s = s.replace(/\^\(([^()]*)\)/g, '^{$1}').replace(/\^(-?\d{2,}|-\d+)/g, '^{$1}');
-    s = s.replace(/([A-Za-z0-9.}\)])\s*[·*]\s*(?=[A-Za-z\\(])/g, '$1 ');
-    s = s.replace(/\s*[·*]\s*/g, ' \\cdot ');
-    return s.replace(/\s+/g, ' ').trim();
-  }
-  function prettyText(str) {
-    return String(str).replace(/([A-Za-z0-9.)])\s*·\s*(?=[A-Za-z(])/g, '$1');
-  }
-  function typesetAnswers() {
-    if (typeof katex === 'undefined' || typeof katex.render !== 'function') return false;
-    if (!katexStyled) {
-      katexStyled = true;
-      var st = document.createElement('style');
-      st.textContent = '.answer .katex-display{margin:.2em 0;text-align:left}.answer .katex-display>.katex{text-align:left}';
-      document.head.appendChild(st);
-    }
-    document.querySelectorAll('.answer[data-answer]').forEach(function (node) {
-      if (node.dataset.typeset === '1') return;
-      var raw = node.dataset.answer;
-      if (/[а-яА-ЯёЁ]/.test(raw)) return;                       
-      try {
-        var frag = document.createDocumentFragment();
-        raw.split(';').forEach(function (part) {                
-          var span = document.createElement('span');
-          katex.render(latexify(part.trim()), span, { displayMode: true, throwOnError: false, strict: false });
-          frag.appendChild(span);
-        });
-        node.textContent = '';
-        node.appendChild(frag);
-        node.dataset.typeset = '1';
-      } catch (e) { }
-    });
-    return true;
-  }
-  function loadKatexFallback() {   
-    if (katexFallbackTried) return;
-    katexFallbackTried = true;
-    var link = document.createElement('link');
-    link.rel = 'stylesheet'; link.href = KATEX_CSS_FALLBACK;
-    document.head.appendChild(link);
-    var sc = document.createElement('script');
-    sc.src = KATEX_JS_FALLBACK;
-    sc.onload = function () { typesetAnswers(); };
-    sc.onerror = function () { };
-    document.head.appendChild(sc);
-  }
-  function waitForKatex() {   
-    if (katexWait) return;
-    var tries = 0;
-    katexWait = setInterval(function () {
-      tries++;
-      if (typesetAnswers()) { clearInterval(katexWait); katexWait = null; return; }
-      if (window.__katexFailed || tries === 6) loadKatexFallback();   
-      if (tries > 80) { clearInterval(katexWait); katexWait = null; }
-    }, 500);
-  }
-  function renderSolutions() {
-    var ok = solutions.filter(function (s) { return s.status === 'ok'; }).length;
-    var head = $('solution-task');
-    head.className = 'card summary';
-    head.textContent = solutions.length ? 'Задач: ' + solutions.length + ' · решено: ' + ok : 'Пока нет решений';
-    var list = $('solution-steps'); list.textContent = '';
-    solutions.forEach(function (s, i) {
-      var card = el('div', 'card prob');
-      card.appendChild(el('div', 'prob-meta', 'Фото ' + (s.photoIndex + 1) + (s.kindLabel ? ' · ' + s.kindLabel : '')));
-      card.appendChild(el('div', 'prob-task', s.text));
-      var box = el('div', 'answer-box' + (s.status === 'fail' ? ' err' : (s.status === 'stub' ? ' stub' : '')));
-      if (s.status === 'ok') {
-        box.appendChild(el('div', 'answer-label', 'Ответ'));
-        var ansEl = el('div', 'answer', prettyText(s.answer));   
-        ansEl.dataset.answer = s.answer;                         
-        box.appendChild(ansEl);
-        if (s.note) box.appendChild(el('div', 'answer-note', s.note));
-      } else {
-        box.appendChild(el('div', 'answer', s.message));
-      }
-      card.appendChild(box);
-      if (s.status === 'ok') addSteps(card, s);
-      if (s.status === 'fail') {
-        var b = el('button', 'btn btn-secondary btn-block', 'Редактировать текст');
-        b.type = 'button';
-        b.addEventListener('click', function () {
-          reviewIdx = s.photoIndex; setState('OCR_REVIEW'); renderReview(); showScreen('ocr-review');
-        });
-        card.appendChild(b);
-      }
-      list.appendChild(card);
-    });
-    if (!typesetAnswers()) waitForKatex();   
+  function showKeyboard() {
+    elements.keyboard.classList.add('show');
+    elements.keyboard.setAttribute('aria-hidden', 'false');
   }
 
-  async function runSolve() {
-    if (solving) return;
-    var probs = [];
-    photos.forEach(function (p, i) {
-      if (!p.ocr) return;
-      var conf = p.ocr.edited ? 1 : p.ocr.confidence, txt = p.ocr.text.trim();
-      if (txt.length < 3) { probs.push({ photoIndex: i, text: txt, confidence: conf }); return; }
-      splitProblems(txt).forEach(function (t) { probs.push({ photoIndex: i, text: t, confidence: conf }); });
-    });
-    if (!probs.length) { toast('Нет текста для решения'); return; }
-    solving = true; solutions = [];
-    $('btn-solve').disabled = true;
-    setState('SOLVING'); renderSkeleton(); showScreen('solution');
-    if (probs.some(function (p) { return p.text.length >= 3 && !(p.confidence < 0.3) && route(p.text) === 'math'; })) {
-      try { await loadNerdamer(); }
-      catch (e) {
-        solving = false; setState('OCR_REVIEW'); renderReview(); showScreen('ocr-review');
-        toast('Нет интернета. Подключитесь один раз для загрузки');
-        return;
-      }
-    }
-    for (var i = 0; i < probs.length; i++) { 
-      await tick(); 
-      var sol = solveOne(probs[i]);
-      solutions.push(sol);
-      if (sol.status === 'ok') saveToHistory(sol.text, sol.answer);
-    }
-    solving = false;
-    setState('SOLUTION_SHOWN');
-    renderSolutions();
-    renderReview();
+  function hideKeyboard() {
+    elements.keyboard.classList.remove('show');
+    elements.keyboard.setAttribute('aria-hidden', 'true');
+    elements.mathInput.focus();
   }
 
-  /* ================= E5: Пошаговое решение ================= */
-  function numsOf(str) {
-    var out = [];
-    String(str).replace(/(\d)\s*,\s*(\d)/g, '$1.$2').replace(/\d+(?:\.\d+)?(?:\/\d+)?/g, function (t) {
-      var v;
-      if (t.indexOf('/') > -1) { var q = t.split('/'); v = Number(q[0]) / Number(q[1]); } else v = Number(t);
-      if (isFinite(v)) out.push(v);
-      return t;
-    });
-    return out;
+  function resetCropBox() {
+    const box = elements.cropBox;
+    box.style.left = '10%';
+    box.style.top = '35%';
+    box.style.width = '80%';
+    box.style.height = '30%';
   }
-  function nearNum(a, b) { return Math.abs(a - b) < 1e-9 || Math.abs(a - b) <= 0.01 * Math.max(Math.abs(a), Math.abs(b)); }
-  function fmt(n) {   
-    if (!isFinite(n)) return String(n);
-    var r = Math.round(n);
-    if (Math.abs(n - r) < 1e-9) return String(r === 0 ? 0 : r);
-    for (var q = 2; q <= 100; q++) {
-      var p = Math.round(n * q);
-      if (Math.abs(n * q - p) < 1e-9) return p + '/' + q;
-    }
-    return String(+n.toFixed(4));
+
+  function createWorkflowItems(files) {
+    state.items.forEach((item) => item.objectUrl && URL.revokeObjectURL(item.objectUrl));
+    state.files = files.slice(0, 20);
+    state.items = state.files.map((file) => ({
+      file,
+      objectUrl: URL.createObjectURL(file),
+      cropBlob: null,
+      cropDataUrl: '',
+      text: '',
+      confidence: null
+    }));
+    state.cropIndex = 0;
+    state.ocrIndex = 0;
   }
-  function fmtD(n) { return Math.abs(n - Math.round(n)) < 1e-9 ? String(Math.round(n)) : String(+n.toFixed(6)); }
-  function signed(n) { var f = fmt(n); return (n < 0 || f.indexOf('/') > -1) ? '(' + f + ')' : f; }
-  function term(a, v) {
-    if (Math.abs(a - 1) < 1e-9) return v;
-    if (Math.abs(a + 1) < 1e-9) return '-' + v;
-    var f = fmt(a);
-    return (f.indexOf('/') > -1 ? '(' + f + ')' : f) + v;
+
+  function openFilePicker(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.value = '';
+    input.click();
   }
-  function matchesAnswer(vals, finalAnswer) {
-    var ans = numsOf(finalAnswer);
-    if (!ans.length) return false;
-    return vals.every(function (v) { return ans.some(function (a) { return nearNum(Math.abs(v), a); }); });
-  }
-  function varsOf(e) {
-    var t = e.replace(FUNCS, ' '), seen = {}, out = [];
-    (t.match(/[a-zA-Z]/g) || []).forEach(function (c) { if (c !== 'e' && c !== 'i' && !seen[c]) { seen[c] = 1; out.push(c); } });
-    return out.sort();
-  }
-  function evalN(e, subs) {   
-    var o = {};
-    Object.keys(subs).forEach(function (k) { o[k] = String(subs[k]); });
-    try { return Number(nerdamer(e, o).evaluate().text('decimals')); } catch (err) { return NaN; }
-  }
-  function polyFit(f, v) {
-    var g = function (x) { var o = {}; o[v] = x; return f(o); };
-    var c = g(0), p = g(1), m = g(-1);
-    if (![c, p, m].every(isFinite)) return null;
-    var A = (p + m) / 2 - c, B = (p - m) / 2, chk = [2, -2, 3, 0.5];
-    for (var i = 0; i < chk.length; i++) {
-      var y = g(chk[i]);
-      if (!isFinite(y) || Math.abs(y - (A * chk[i] * chk[i] + B * chk[i] + c)) > 1e-7 * (1 + Math.abs(y) + Math.abs(c))) return null;
-    }
-    return { A: A, B: B, C: c };
-  }
-  function linearSteps(lhs, rhs, v, fa) {
-    var L = polyFit(function (o) { return evalN(lhs, o); }, v), R = polyFit(function (o) { return evalN(rhs, o); }, v);
-    if (!L || !R || Math.abs(L.A) > 1e-9 || Math.abs(R.A) > 1e-9) return null;
-    var al = L.B, bl = L.C, ar = R.B, br = R.C, a = al - ar;
-    if (Math.abs(a) < 1e-9) return null;
-    var c = br - bl, x = c / a, steps = [];
-    if (Math.abs(ar) < 1e-9) {   
-      if (Math.abs(bl) > 1e-9) {
-        steps.push('1. Перенесем ' + fmt(bl) + ' в правую часть' + (bl < 0 ? ' (знак меняется)' : '') + ': ' + term(a, v) + ' = ' + fmt(br) + (bl < 0 ? ' + ' + fmt(-bl) : ' - ' + fmt(bl)) + ' = ' + fmt(c));
-      }
-    } else {                     
-      steps.push('1. Перенесем слагаемые с ' + v + ' влево, числа вправо: (' + fmt(al) + ' - ' + signed(ar) + ')' + v + ' = ' + fmt(br) + ' - ' + signed(bl) + ', то есть ' + term(a, v) + ' = ' + fmt(c));
-    }
-    if (Math.abs(a - 1) > 1e-9) steps.push((steps.length + 1) + '. Разделим обе части на ' + fmt(a) + ': ' + v + ' = ' + fmt(c) + ' / ' + fmt(a) + ' = ' + fmt(x));
-    if (!steps.length) return null;
-    return matchesAnswer([x], fa) ? steps : null;
-  }
-  function quadraticSteps(lhs, rhs, v, fa) {
-    var F = polyFit(function (o) { return evalN(lhs, o) - evalN(rhs, o); }, v);
-    if (!F || Math.abs(F.A) < 1e-9) return null;
-    var A = F.A, B = F.B, C = F.C, D = B * B - 4 * A * C;
-    var steps = [
-      '1. Приведем уравнение к виду ax² + bx + c = 0: a = ' + fmt(A) + ', b = ' + fmt(B) + ', c = ' + fmt(C),
-      '2. Найдем дискриминант по формуле D = b² - 4ac: D = ' + signed(B) + '² - 4·' + signed(A) + '·' + signed(C) + ' = ' + fmt(D)
-    ];
-    if (D > 1e-9) {
-      var sq = Math.sqrt(D), r1 = (-B + sq) / (2 * A), r2 = (-B - sq) / (2 * A);
-      var sqs = Math.abs(sq - Math.round(sq)) < 1e-9 ? fmt(sq) : '√' + fmt(D);
-      steps.push('3. D > 0, значит два корня: ' + v + ' = (-b ± √D) / (2a)');
-      steps.push('4. Вычислим корни: ' + v + '₁ = (' + fmt(-B) + ' + ' + sqs + ') / ' + signed(2 * A) + ' = ' + fmt(r1) + ';  ' + v + '₂ = (' + fmt(-B) + ' - ' + sqs + ') / ' + signed(2 * A) + ' = ' + fmt(r2));
-      return matchesAnswer([r1, r2], fa) ? steps : null;
-    }
-    if (Math.abs(D) <= 1e-9) {
-      var r = -B / (2 * A);
-      steps.push('3. D = 0, значит один корень: ' + v + ' = -b / (2a) = ' + fmt(-B) + ' / ' + signed(2 * A) + ' = ' + fmt(r));
-      return matchesAnswer([r], fa) ? steps : null;
-    }
-    steps.push('3. D < 0, значит действительных корней нет');
-    return /нет|i/i.test(String(fa)) ? steps : null;
-  }
-  function systemSteps(lines, fa) {
-    var eqs = lines.map(function (l) { return l.split('='); });
-    if (eqs.some(function (q) { return q.length !== 2 || !q[1].trim(); })) return null;
-    var vars = varsOf(lines.join(' '));
-    if (vars.length !== 2) return null;
-    var X = vars[0], Y = vars[1];
-    var coef = function (q) {   
-      var g = function (x, y) { var o = {}; o[X] = x; o[Y] = y; return evalN(q[0], o) - evalN(q[1], o); };
-      var g0 = g(0, 0), a = g(1, 0) - g0, b = g(0, 1) - g0, k = -g0;
-      var t1 = g(2, 3), t2 = g(-1, 2);
-      if (![g0, a, b, t1, t2].every(isFinite)) return null;
-      if (Math.abs(t1 - (2 * a + 3 * b - k)) > 1e-7 * (1 + Math.abs(t1)) || Math.abs(t2 - (-a + 2 * b - k)) > 1e-7 * (1 + Math.abs(t2))) return null;
-      return { a: a, b: b, k: k };
+
+  function showCropScreen(index = 0) {
+    if (!state.items.length) return;
+    state.cropIndex = Math.max(0, Math.min(index, state.items.length - 1));
+    const item = state.items[state.cropIndex];
+    state.cropObjectUrl = item.objectUrl;
+    elements.cropImage.onload = () => {
+      resetCropBox();
+      navigate('crop');
     };
-    var c1 = coef(eqs[0]), c2 = coef(eqs[1]);
-    if (!c1 || !c2) return null;
-    var u = X, w = Y;
-    if (Math.abs(c1.a) < 1e-9) {
-      if (Math.abs(c1.b) < 1e-9) return null;
-      u = Y; w = X;
-      c1 = { a: c1.b, b: c1.a, k: c1.k }; c2 = { a: c2.b, b: c2.a, k: c2.k };
-    }
-    var P = c2.b - c2.a * c1.b / c1.a, Q = c2.k - c2.a * c1.k / c1.a;
-    if (Math.abs(P) < 1e-9) return null;   
-    var wv = Q / P, uv = (c1.k - c1.b * wv) / c1.a;
-    var expr = '(' + fmt(c1.k) + ' - ' + signed(c1.b) + '·' + w + ') / ' + signed(c1.a);
-    var steps = [
-      '1. Выразим ' + u + ' из первого уравнения: ' + u + ' = ' + expr,
-      '2. Подставим во второе уравнение: ' + signed(c2.a) + '·' + '(' + expr + ') + ' + signed(c2.b) + '·' + w + ' = ' + fmt(c2.k),
-      '3. Раскроем скобки и приведем подобные слагаемые: ' + signed(P) + '·' + w + ' = ' + fmt(Q),
-      '4. Найдем ' + w + ': ' + w + ' = ' + fmt(Q) + ' / ' + signed(P) + ' = ' + fmt(wv),
-      '5. Подставим ' + w + ' = ' + fmt(wv) + ' в выражение для ' + u + ': ' + u + ' = (' + fmt(c1.k) + ' - ' + signed(c1.b) + '·' + signed(wv) + ') / ' + signed(c1.a) + ' = ' + fmt(uv),
-      '6. Получили: ' + (u === X ? X + ' = ' + fmt(uv) + ', ' + Y + ' = ' + fmt(wv) : X + ' = ' + fmt(wv) + ', ' + Y + ' = ' + fmt(uv))
-    ];
-    return matchesAnswer([uv, wv], fa) ? steps : null;
-  }
-  function arithSteps(expr, fa) {   
-    var e = expr.replace(/\s+/g, '').replace(/·/g, '*');
-    if (!/^[\d.+\-*\/^()]+$/.test(e) || !/\d[+\-*\/^]\(?\d/.test(e) || /\d\(|\)\d|\)\(/.test(e)) return null;
-    var steps = [], num = '\\d+(?:\\.\\d+)?', guard = 0, m;
-    var push = function (t) { steps.push((steps.length + 1) + '. ' + t); };
-    var rs = function (r) { return String(+r.toFixed(9)); };
-    var flat = function (str) {
-      var g = 0, m2;
-      while (g++ < 40) {
-        if ((m2 = new RegExp('(' + num + ')\\^(' + num + ')').exec(str))) {
-          var r1 = Math.pow(+m2[1], +m2[2]);
-          push('Возведем в степень: ' + m2[1] + '^' + m2[2] + ' = ' + fmtD(r1)); str = str.replace(m2[0], rs(r1)); continue;
-        }
-        if ((m2 = new RegExp('(' + num + ')([*\\/])(' + num + ')').exec(str))) {
-          if (m2[2] === '/' && +m2[3] === 0) throw new Error('div0');
-          var r2 = m2[2] === '*' ? +m2[1] * +m2[3] : +m2[1] / +m2[3];
-          push((m2[2] === '*' ? 'Выполним умножение: ' + m2[1] + ' · ' + m2[3] : 'Выполним деление: ' + m2[1] + ' / ' + m2[3]) + ' = ' + fmtD(r2));
-          str = str.replace(m2[0], rs(r2)); continue;
-        }
-        if ((m2 = new RegExp('^(-?' + num + ')([+\\-])(' + num + ')').exec(str))) {
-          var r3 = m2[2] === '+' ? +m2[1] + +m2[3] : +m2[1] - +m2[3];
-          push((m2[2] === '+' ? 'Выполним сложение: ' : 'Выполним вычитание: ') + m2[1] + ' ' + m2[2] + ' ' + m2[3] + ' = ' + fmtD(r3));
-          str = str.replace(m2[0], rs(r3)); continue;
-        }
-        break;
-      }
-      return str;
+    elements.cropImage.onerror = () => {
+      showToast('Не удалось открыть изображение.');
+      navigate('home');
     };
-    while (guard++ < 20 && (m = /\(([^()]*)\)/.exec(e))) {
-      if (/^\d+(?:\.\d+)?$/.test(m[1])) { e = e.replace(m[0], m[1]); continue; }
-      push('Сначала выполним действия в скобках: (' + m[1] + ')');
-      var res = flat(m[1]);
-      if (!/^\d+(?:\.\d+)?$/.test(res)) return null;
-      e = e.replace(m[0], res);
-    }
-    e = flat(e);
-    if (!/^-?\d+(?:\.\d+)?$/.test(e) || !steps.length) return null;
-    return matchesAnswer([Number(e)], fa) ? steps : null;
+    elements.cropImage.src = item.objectUrl;
+    if (elements.cropImage.complete && elements.cropImage.naturalWidth > 0) elements.cropImage.onload();
   }
-  function groupSteps(expr) {   
-    var s = expr.replace(/\s+/g, '').replace(/·/g, '*');
-    if (!/^[+\-]?[\w.*^]+(?:[+\-][\w.*^]+)*$/.test(s)) return null;
-    var terms = s.match(/[+\-]?[^+\-]+/g), groups = [], idx = {};
-    for (var i = 0; i < terms.length; i++) {
-      var m = /^([+\-]?)(\d*\.?\d*)\*?([a-zA-Z](?:\^\d+)?)?$/.exec(terms[i]);
-      if (!m || (m[2] === '' && !m[3])) return null;
-      var c = (m[2] === '' ? 1 : Number(m[2])) * (m[1] === '-' ? -1 : 1), key = m[3] || '';
-      if (!(key in idx)) { idx[key] = groups.length; groups.push({ key: key, cs: [] }); }
-      groups[idx[key]].cs.push(c);
+
+  function stopCropInteraction() {
+    const pointerId = state.cropDrag?.pointerId;
+    if (pointerId !== undefined && elements.cropBox.hasPointerCapture?.(pointerId)) {
+      elements.cropBox.releasePointerCapture(pointerId);
     }
-    if (!groups.some(function (g) { return g.cs.length > 1; })) return null;
-    var list = function (cs) { return cs.map(function (c, k) { return k === 0 ? fmt(c) : (c < 0 ? '- ' + fmt(-c) : '+ ' + fmt(c)); }).join(' '); };
-    var joinSigned = function (items) {
-      return items.map(function (it, k) { return k === 0 ? (it.neg ? '-' : '') + it.text : (it.neg ? ' - ' : ' + ') + it.text; }).join('');
+    state.cropDrag = null;
+  }
+
+  function getLocalPoint(event) {
+    const rect = elements.cropContainer.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
+      y: Math.max(0, Math.min(rect.height, event.clientY - rect.top)),
+      width: rect.width,
+      height: rect.height
     };
-    var before = groups.map(function (g) {
-      return g.cs.length > 1 ? { neg: false, text: '(' + list(g.cs) + ')' + g.key } : { neg: g.cs[0] < 0, text: fmt(Math.abs(g.cs[0])) + g.key };
-    });
-    var sums = groups.map(function (g) { return { key: g.key, c: g.cs.reduce(function (p, q) { return p + q; }, 0) }; }).filter(function (g) { return Math.abs(g.c) > 1e-9; });
-    var after = sums.map(function (g) { return { neg: g.c < 0, text: (Math.abs(Math.abs(g.c) - 1) < 1e-9 && g.key ? '' : fmt(Math.abs(g.c))) + g.key }; });
-    var resText = after.length ? joinSigned(after) : '0';
-    var resExpr = sums.length ? sums.map(function (g) { return '(' + g.c + ')' + (g.key ? '*' + g.key : ''); }).join('+') : '0';
-    if (!sameValue(s, resExpr, detectVar(s))) return null;
-    return ['1. Сгруппируем подобные слагаемые: ' + joinSigned(before), '2. Сложим коэффициенты: ' + resText];
   }
-  function expandSteps(expr, fa) {
-    if (!/\)\s*\^?[23]|\)\s*\(/.test(expr)) return null;
-    var working = expr.replace(/\s+/g, '');
-    var regex = /\(([^()]+)\)(\^[23])?/g;
-    var match;
-    var expanded = working;
-    var step1Parts = [];
-    while ((match = regex.exec(working)) !== null) {
-      var fullMatch = match[0];
-      var inner = match[1];
-      if (/^[\d.x]+$/.test(inner) && !match[2]) continue;
-      try {
-        var expandedPart = nerdamer(fullMatch).expand().toString().replace(/\*/g, '');
-        expanded = expanded.replace(fullMatch, '(' + expandedPart + ')');
-        expandedPart = expandedPart.replace(/^\+/, '');
-        step1Parts.push(fullMatch + ' = ' + expandedPart);
-      } catch (err) {}
-    }
-    if (!step1Parts.length) return null;
-    var steps = [];
-    if (step1Parts.length === 1) steps.push('1. Раскроем скобки: ' + step1Parts[0]);
-    else steps.push('1. Раскроем скобки по формулам сокращенного умножения: ' + step1Parts.join('; '));
-    var finalVal = nerdamer(working).expand().toString().replace(/\*/g, '');
-    if (expanded !== finalVal) {
-       steps.push('2. Подставим раскрытые скобки: ' + expanded);
-       steps.push('3. Приведем подобные слагаемые: ' + finalVal);
+
+  function getBoxMetrics() {
+    const containerRect = elements.cropContainer.getBoundingClientRect();
+    const boxRect = elements.cropBox.getBoundingClientRect();
+    return {
+      left: boxRect.left - containerRect.left,
+      top: boxRect.top - containerRect.top,
+      width: boxRect.width,
+      height: boxRect.height,
+      containerWidth: containerRect.width,
+      containerHeight: containerRect.height
+    };
+  }
+
+  function setBoxMetrics(metrics) {
+    const safe = {
+      left: Math.max(0, Math.min(metrics.left, metrics.containerWidth - metrics.width)),
+      top: Math.max(0, Math.min(metrics.top, metrics.containerHeight - metrics.height)),
+      width: Math.max(24, Math.min(metrics.width, metrics.containerWidth)),
+      height: Math.max(24, Math.min(metrics.height, metrics.containerHeight))
+    };
+    safe.left = Math.min(safe.left, metrics.containerWidth - safe.width);
+    safe.top = Math.min(safe.top, metrics.containerHeight - safe.height);
+    elements.cropBox.style.left = `${safe.left}px`;
+    elements.cropBox.style.top = `${safe.top}px`;
+    elements.cropBox.style.width = `${safe.width}px`;
+    elements.cropBox.style.height = `${safe.height}px`;
+  }
+
+  function beginCropPointer(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const handle = event.target.closest('.handle');
+    const mode = handle ? handle.dataset.dir : 'move';
+    if (!handle && event.target !== elements.cropBox && !event.target.closest('#crop-box')) return;
+    state.cropDrag = {
+      pointerId: event.pointerId,
+      mode,
+      start: getLocalPoint(event),
+      box: getBoxMetrics()
+    };
+    elements.cropBox.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }
+
+  function moveCropPointer(event) {
+    const drag = state.cropDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const point = getLocalPoint(event);
+    const dx = point.x - drag.start.x;
+    const dy = point.y - drag.start.y;
+    const minSize = 32;
+    let { left, top, width, height } = drag.box;
+
+    if (drag.mode === 'move') {
+      left = Math.max(0, Math.min(drag.box.containerWidth - width, left + dx));
+      top = Math.max(0, Math.min(drag.box.containerHeight - height, top + dy));
     } else {
-       steps.push('2. Получим: ' + finalVal);
+      const right = drag.box.left + drag.box.width;
+      const bottom = drag.box.top + drag.box.height;
+      if (drag.mode.includes('l')) {
+        left = Math.max(0, Math.min(drag.box.left + drag.box.width - minSize, drag.box.left + dx));
+        width = right - left;
+      }
+      if (drag.mode.includes('r')) {
+        width = Math.max(minSize, Math.min(drag.box.containerWidth - drag.box.left, drag.box.width + dx));
+      }
+      if (drag.mode.includes('t')) {
+        top = Math.max(0, Math.min(drag.box.top + drag.box.height - minSize, drag.box.top + dy));
+        height = bottom - top;
+      }
+      if (drag.mode.includes('b')) {
+        height = Math.max(minSize, Math.min(drag.box.containerHeight - drag.box.top, drag.box.height + dy));
+      }
     }
-    var finalNums = numsOf(finalVal);
-    if (finalNums.length > 0 && matchesAnswer(finalNums, fa)) return steps;
-    if (sameValue(finalVal, fa)) return steps;
-    return null;
+    setBoxMetrics({ left, top, width, height, containerWidth: drag.box.containerWidth, containerHeight: drag.box.containerHeight });
+    event.preventDefault();
   }
-  function logSteps(expr, fa) {
-    if (!/\b(log|ln)\s*\(/i.test(expr)) return null;
-    var steps = [];
-    steps.push('1. Используем определение логарифма.');
-    if (expr.indexOf('=') > -1) {
-      steps.push('2. Перепишем уравнение: log_a(b) = c => a^c = b');
-      steps.push('3. Перейдем к показательному уравнению.');
-      steps.push('4. Решим полученное уравнение: ' + fa);
-    } else {
-      steps.push('2. Упростим выражение с помощью свойств логарифмов.');
-      steps.push('3. Ответ: ' + fa);
+
+  function endCropPointer(event) {
+    if (!state.cropDrag || state.cropDrag.pointerId !== event.pointerId) return;
+    elements.cropBox.releasePointerCapture?.(event.pointerId);
+    state.cropDrag = null;
+  }
+
+  function loadImage(url) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Не удалось прочитать изображение'));
+      image.src = url;
+    });
+  }
+
+  function rgbToGray(r, g, b) {
+    return Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+  }
+
+  function otsuBinarize(imageData) {
+    const { data } = imageData;
+    const histogram = new Uint32Array(256);
+    const gray = new Uint8Array(data.length / 4);
+    for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+      const value = rgbToGray(data[i], data[i + 1], data[i + 2]);
+      gray[p] = value;
+      histogram[value] += 1;
+    }
+
+    let total = 0;
+    for (let i = 0; i < 256; i += 1) total += i * histogram[i];
+    let backgroundWeight = 0;
+    let backgroundSum = 0;
+    let threshold = 128;
+    let maxVariance = 0;
+    const totalPixels = gray.length;
+
+    for (let i = 0; i < 256; i += 1) {
+      backgroundWeight += histogram[i];
+      if (!backgroundWeight) continue;
+      const foregroundWeight = totalPixels - backgroundWeight;
+      if (!foregroundWeight) break;
+      backgroundSum += i * histogram[i];
+      const meanBackground = backgroundSum / backgroundWeight;
+      const meanForeground = (total - backgroundSum) / foregroundWeight;
+      const variance = backgroundWeight * foregroundWeight * (meanBackground - meanForeground) ** 2;
+      if (variance > maxVariance) {
+        maxVariance = variance;
+        threshold = i;
+      }
+    }
+
+    for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+      const value = gray[p] > threshold ? 255 : 0;
+      data[i] = value;
+      data[i + 1] = value;
+      data[i + 2] = value;
+      data[i + 3] = 255;
+    }
+    return imageData;
+  }
+
+  function canvasToBlob(canvas, type = 'image/png', quality = 0.95) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Не удалось создать изображение')), type, quality);
+    });
+  }
+
+  function getCropSourceRect() {
+    const container = elements.cropContainer.getBoundingClientRect();
+    const image = elements.cropImage.getBoundingClientRect();
+    const box = elements.cropBox.getBoundingClientRect();
+    const left = Math.max(box.left, image.left);
+    const top = Math.max(box.top, image.top);
+    const right = Math.min(box.right, image.right);
+    const bottom = Math.min(box.bottom, image.bottom);
+    if (right <= left || bottom <= top) throw new Error('Рамка должна находиться внутри изображения');
+
+    const scaleX = elements.cropImage.naturalWidth / image.width;
+    const scaleY = elements.cropImage.naturalHeight / image.height;
+    return {
+      x: (left - image.left) * scaleX,
+      y: (top - image.top) * scaleY,
+      width: (right - left) * scaleX,
+      height: (bottom - top) * scaleY,
+      container
+    };
+  }
+
+  async function cropCurrentImage() {
+    const item = state.items[state.cropIndex];
+    if (!item) throw new Error('Изображение не выбрано');
+    const source = await loadImage(item.objectUrl);
+    const rect = getCropSourceRect();
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(rect.width));
+    canvas.height = Math.max(1, Math.round(rect.height));
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.drawImage(source, rect.x, rect.y, rect.width, rect.height, 0, 0, canvas.width, canvas.height);
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    context.putImageData(otsuBinarize(imageData), 0, 0);
+    item.cropBlob = await canvasToBlob(canvas);
+    item.cropDataUrl = canvas.toDataURL('image/png');
+    return item.cropBlob;
+  }
+
+  async function ensureTesseract() {
+    if (window.Tesseract) return window.Tesseract;
+    if (!state.tesseractPromise) {
+      state.tesseractPromise = loadScript(CDN.tesseract, 'Tesseract').catch((error) => {
+        state.tesseractPromise = null;
+        throw error;
+      });
+    }
+    return state.tesseractPromise;
+  }
+
+  async function createTesseractWorker() {
+    const Tesseract = await ensureTesseract();
+    if (state.tesseractWorker) return state.tesseractWorker;
+    const logger = (event) => {
+      if (event.status === 'recognizing text' && Number.isFinite(event.progress)) {
+        const base = state.cropIndex / Math.max(1, state.items.length);
+        setProgress((base + event.progress / Math.max(1, state.items.length)) * 100, `Распознавание: ${Math.round(event.progress * 100)}%`);
+      }
+    };
+    try {
+      state.tesseractWorker = await Tesseract.createWorker('rus+eng', 1, { logger });
+    } catch (error) {
+      state.tesseractWorker = await Tesseract.createWorker('eng', 1, { logger });
+    }
+    return state.tesseractWorker;
+  }
+
+  async function recognizeBlob(blob) {
+    const worker = await createTesseractWorker();
+    const result = await worker.recognize(blob, {}, { preserve_interword_spaces: '1' });
+    return {
+      text: result?.data?.text?.trim() || '',
+      confidence: Number.isFinite(result?.data?.confidence) ? result.data.confidence : null
+    };
+  }
+
+  function normalizeMathText(input) {
+    let text = String(input || '')
+      .replace(/[\u2212\u2013\u2014]/g, '-')
+      .replace(/[×✕]/g, '*')
+      .replace(/[÷:]/g, '/')
+      .replace(/π/g, 'pi')
+      .replace(/∞/g, 'Infinity')
+      .replace(/[²]/g, '^2')
+      .replace(/[³]/g, '^3')
+      .replace(/√\s*\(/g, 'sqrt(')
+      .replace(/√\s*([0-9.]+)/g, 'sqrt($1)')
+      .replace(/\s+/g, ' ')
+      .trim();
+    text = text.replace(/\b([0-9]+)\s*([a-zA-Z])\b/g, '$1*$2');
+    text = text.replace(/\)\s*([a-zA-Z0-9])/g, ')*$1');
+    text = text.replace(/([a-zA-Z0-9])\s*\(/g, '$1*(');
+    text = text.replace(/\b(sqrt|sin|cos|tan|log)\*\(/g, '$1(');
+    return text;
+  }
+
+  function getVariables(expression) {
+    const withoutFunctions = expression
+      .replace(/sqrt|sin|cos|tan|log|abs|exp|pi/gi, '')
+      .replace(/\d+(?:\.\d+)?/g, '')
+      .replace(/[+\-*/^().,=\s]/g, '');
+    return Array.from(new Set(withoutFunctions.split('').filter((char) => /[a-zA-Z]/.test(char))));
+  }
+
+  function cleanNerdamerAnswer(value) {
+    if (Array.isArray(value)) return value.map(cleanNerdamerAnswer).filter(Boolean).join(', ');
+    if (value && typeof value.text === 'function') return value.text('fractions');
+    return String(value ?? '').replace(/^\[|\]$/g, '').trim();
+  }
+
+  function extractEquationAnswer(raw, variable) {
+    if (!Array.isArray(raw)) return cleanNerdamerAnswer(raw);
+    const values = raw.map((entry) => {
+      if (!Array.isArray(entry)) return cleanNerdamerAnswer(entry);
+      const variableIndex = entry.findIndex((part) => String(part).trim() === variable);
+      const candidate = variableIndex >= 0 ? entry[variableIndex + 1] : entry[entry.length - 1];
+      return cleanNerdamerAnswer(candidate);
+    }).filter(Boolean);
+    return Array.from(new Set(values)).join(', ');
+  }
+
+  function numericNerdamer(expression) {
+    if (!window.nerdamer) return NaN;
+    try {
+      const result = window.nerdamer(expression).evaluate().text('decimal');
+      const number = Number(result);
+      return Number.isFinite(number) ? number : NaN;
+    } catch {
+      return NaN;
+    }
+  }
+
+  function evaluateAt(expression, variable, value) {
+    const pattern = new RegExp(`\\b${variable.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'g');
+    return numericNerdamer(expression.replace(pattern, `(${value})`));
+  }
+
+  function formatNumber(value) {
+    if (!Number.isFinite(value)) return String(value);
+    if (Math.abs(value - Math.round(value)) < 1e-10) return String(Math.round(value));
+    return String(Number(value.toFixed(10)));
+  }
+
+  function polynomialCoefficients(left, right, variable) {
+    const expression = `(${left})-(${right})`;
+    const c = evaluateAt(expression, variable, 0);
+    const plus = evaluateAt(expression, variable, 1);
+    const minus = evaluateAt(expression, variable, -1);
+    const two = evaluateAt(expression, variable, 2);
+    if (![c, plus, minus, two].every(Number.isFinite)) return null;
+    const a = (plus + minus - 2 * c) / 2;
+    const b = (plus - minus) / 2;
+    const residual = two - (4 * a + 2 * b + c);
+    if (Math.abs(residual) > 1e-7) return null;
+    return { a, b, c };
+  }
+
+  function polynomialText(a, b, c, variable) {
+    const parts = [];
+    if (Math.abs(a) > 1e-10) parts.push(`${formatNumber(a)}${variable}^2`);
+    if (Math.abs(b) > 1e-10) parts.push(`${b >= 0 && parts.length ? '+' : ''}${formatNumber(b)}${variable}`);
+    if (Math.abs(c) > 1e-10 || !parts.length) parts.push(`${c >= 0 && parts.length ? '+' : ''}${formatNumber(c)}`);
+    return parts.join('');
+  }
+
+  function generateSteps(text, variable, left, right) {
+    const steps = [];
+    const hasParentheses = /\([^()]+\)/.test(text);
+    const coefficients = polynomialCoefficients(left, right, variable);
+
+    if (hasParentheses && window.nerdamer) {
+      try {
+        const expandedLeft = cleanNerdamerAnswer(window.nerdamer(left).expand());
+        const expandedRight = cleanNerdamerAnswer(window.nerdamer(right).expand());
+        if (expandedLeft !== left || expandedRight !== right) {
+          steps.push(`Раскрываем скобки: ${expandedLeft} = ${expandedRight}`);
+        }
+      } catch {
+        // Steps are optional; the answer remains valid if expansion is unavailable.
+      }
+    }
+
+    if (!coefficients) return steps;
+    const { a, b, c } = coefficients;
+    if (Math.abs(a) < 1e-10 && Math.abs(b) > 1e-10) {
+      steps.push(`${polynomialText(0, b, c, variable)} = 0`);
+      if (Math.abs(c) > 1e-10) steps.push(`${formatNumber(b)}${variable} = ${formatNumber(-c)}`);
+      steps.push(`${variable} = ${formatNumber(-c / b)}`);
+    } else if (Math.abs(a) > 1e-10) {
+      const discriminant = b * b - 4 * a * c;
+      steps.push(`${polynomialText(a, b, c, variable)} = 0`);
+      steps.push(`Дискриминант: D = b^2 - 4ac = ${formatNumber(discriminant)}`);
+      if (discriminant >= 0) {
+        steps.push(`${variable}_{1,2} = (-b ± √D) / (2a)`);
+        steps.push(`${variable}_{1,2} = ${formatNumber((-b + Math.sqrt(discriminant)) / (2 * a))}, ${formatNumber((-b - Math.sqrt(discriminant)) / (2 * a))}`);
+      } else {
+        steps.push('D < 0, действительных корней нет.');
+      }
     }
     return steps;
   }
-  function generateSteps(taskText, finalAnswer) {
+
+  function solveWithNerdamer(text) {
+    if (!window.nerdamer) return null;
+    const normalized = normalizeMathText(text);
+    const equationParts = normalized.split('=').map((part) => part.trim());
     try {
-      var text = String(taskText), ch = parseChoices(text), base = ch ? ch.stem : text;
-      var lines = base.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
-      var eqLines = lines.filter(function (l) { return /\S\s*=\s*\S/.test(l); });
-      var steps = null;
-      
-      if (eqLines.length >= 2) {
-        steps = systemSteps(eqLines.map(function (l) { return cleanMath(normalize(l)).replace(/[{}]/g, '').trim(); }), finalAnswer);
-      } else {
-        var e = cleanMath(normalize(base)).replace(/[{}]/g, '');
-        
-        if (/\b(log|ln)\s*\(/i.test(e)) {
-          steps = logSteps(e, finalAnswer);
+      if (equationParts.length === 2) {
+        const [left, right] = equationParts;
+        const variable = getVariables(normalized)[0];
+        if (!variable) {
+          const value = window.nerdamer(`(${left})-(${right})`).evaluate().text('decimal');
+          return { status: Math.abs(Number(value)) < 1e-10 ? 'ok' : 'error', answer: Math.abs(Number(value)) < 1e-10 ? 'Верно' : 'Уравнение неверно', steps: [] };
         }
-        
-        if (!steps && e.indexOf('=') > -1) {
-          var parts = e.split('=');
-          if (parts.length === 2 && parts[1].trim()) {
-            var v = detectVar(e);
-            if (v) steps = linearSteps(parts[0], parts[1], v, finalAnswer) || quadraticSteps(parts[0], parts[1], v, finalAnswer);
-            e = '';
-          } else if (parts.length === 2) e = parts[0];
-        }
-        
-        if (!steps && e && e.indexOf('=') === -1) {
-          steps = expandSteps(e, finalAnswer) || arithSteps(e, finalAnswer) || groupSteps(e);
-        }
+        const raw = window.nerdamer.solveEquations(`${left}=${right}`, variable);
+        const answer = extractEquationAnswer(raw, variable);
+        if (!answer) return null;
+        return { status: 'ok', answer, steps: generateSteps(normalized, variable, left, right) };
       }
-      return steps || [];
-    } catch (err) { return []; }
+
+      const expression = normalized.replace(/^вычисли\s*/i, '').trim();
+      const result = window.nerdamer(expression).evaluate();
+      const answer = cleanNerdamerAnswer(result);
+      if (!answer) return null;
+      const expanded = /\([^()]+\)/.test(expression) ? cleanNerdamerAnswer(window.nerdamer(expression).expand()) : '';
+      return {
+        status: 'ok',
+        answer,
+        steps: expanded && expanded !== expression ? [`Раскрываем скобки: ${expanded}`] : []
+      };
+    } catch {
+      return null;
+    }
   }
 
-  function addSteps(card, s) {
-    var btn = el('button', 'btn btn-secondary btn-block', 'Показать шаги решения');
-    btn.type = 'button';
-    var steps = el('div', 'answer-steps');
-    steps.style.cssText = 'display:none; margin-top: 12px; padding-left: 12px; border-left: 2px solid var(--border);';
-    btn.addEventListener('click', function () {
-      var list = generateSteps(s.text, s.answer);
-      steps.textContent = '';
-      (list.length ? list : ['Для этого типа задач пошаговый разбор пока не поддерживается.']).forEach(function (l) {
-        steps.appendChild(el('div', 'step', l));
+  function solveOne(text) {
+    const source = String(text || '').trim();
+    if (!source) return { status: 'error', answer: 'Введите выражение или уравнение.', steps: [] };
+    if (!window.nerdamer) {
+      return { status: 'error', answer: 'Математический модуль ещё загружается. Повторите попытку через секунду.', steps: [] };
+    }
+    const result = solveWithNerdamer(source);
+    return result || { status: 'error', answer: 'Не удалось распознать математическое выражение.', steps: [] };
+  }
+
+  function latexify(value) {
+    let latex = String(value ?? '')
+      .replace(/\\/g, '\\\\')
+      .replace(/\*/g, ' \\cdot ')
+      .replace(/sqrt\s*\(([^()]+)\)/gi, '\\sqrt{$1}')
+      .replace(/√\s*([^\s,;]+)/g, '\\sqrt{$1}')
+      .replace(/\b([+-]?(?:\d+(?:\.\d+)?|[a-zA-Z]))\/([+-]?(?:\d+(?:\.\d+)?|[a-zA-Z]))\b/g, '\\frac{$1}{$2}')
+      .replace(/\bpi\b/gi, '\\pi')
+      .replace(/\s\+\-/g, ' - ');
+    latex = latex.replace(/([a-zA-Z0-9)])\^([a-zA-Z0-9]+)/g, '$1^{$2}');
+    return latex;
+  }
+
+  function renderMath(target, value, displayMode = false) {
+    if (!target) return;
+    target.textContent = '';
+    if (window.katex && !window.__katexFailed) {
+      try {
+        window.katex.render(latexify(value), target, { throwOnError: false, displayMode });
+        return;
+      } catch {
+        // Plain text fallback below.
+      }
+    }
+    target.textContent = String(value ?? '');
+  }
+
+  function renderSolution(task, result) {
+    elements.solutionTask.textContent = '';
+    const taskLabel = document.createElement('div');
+    taskLabel.className = 'summary';
+    taskLabel.textContent = 'Задача';
+    const taskValue = document.createElement('div');
+    taskValue.className = 'prob-task';
+    taskValue.textContent = task;
+    elements.solutionTask.append(taskLabel, taskValue);
+
+    elements.solutionSteps.replaceChildren();
+    const answerCard = document.createElement('div');
+    answerCard.className = `card answer-box${result.status === 'ok' ? '' : ' err'}`;
+    const answerLabel = document.createElement('div');
+    answerLabel.className = 'answer-label';
+    answerLabel.textContent = result.status === 'ok' ? 'Ответ' : 'Ошибка';
+    const answer = document.createElement('div');
+    answer.className = 'answer';
+    renderMath(answer, result.answer);
+    answerCard.append(answerLabel, answer);
+    elements.solutionSteps.append(answerCard);
+
+    if (result.steps?.length) {
+      const stepsCard = document.createElement('div');
+      stepsCard.className = 'card answer-steps';
+      const title = document.createElement('div');
+      title.className = 'answer-label';
+      title.textContent = 'Шаги решения';
+      stepsCard.append(title);
+      result.steps.forEach((step, index) => {
+        const line = document.createElement('div');
+        line.className = 'step';
+        const number = document.createElement('span');
+        number.textContent = `${index + 1}. `;
+        const formula = document.createElement('span');
+        renderMath(formula, step);
+        line.append(number, formula);
+        stepsCard.append(line);
       });
-      steps.style.display = 'block';
-      btn.disabled = true;
+      elements.solutionSteps.append(stepsCard);
+    }
+  }
+
+  function getHistory() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEYS.history) || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveHistory(task, result) {
+    if (result.status !== 'ok') return;
+    const item = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      task,
+      answer: result.answer,
+      steps: Array.isArray(result.steps) ? result.steps : [],
+      date: new Date().toISOString()
+    };
+    const history = [item, ...getHistory()].slice(0, 100);
+    localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(history));
+  }
+
+  function formatHistoryDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  }
+
+  function renderHistory() {
+    if (!elements.historyList) return;
+    const history = getHistory();
+    elements.historyList.replaceChildren();
+    if (!history.length) {
+      const empty = document.createElement('div');
+      empty.className = 'card status';
+      empty.textContent = 'История пока пуста.';
+      elements.historyList.append(empty);
+      return;
+    }
+    history.forEach((item) => {
+      const card = document.createElement('article');
+      card.className = 'card history-item';
+      const date = document.createElement('div');
+      date.className = 'history-date';
+      date.textContent = formatHistoryDate(item.date);
+      const task = document.createElement('div');
+      task.className = 'history-task';
+      task.textContent = item.task || '';
+      const answer = document.createElement('div');
+      answer.className = 'history-answer';
+      renderMath(answer, item.answer || '');
+      const deleteButton = document.createElement('button');
+      deleteButton.className = 'history-del';
+      deleteButton.type = 'button';
+      deleteButton.dataset.historyId = item.id;
+      deleteButton.setAttribute('aria-label', 'Удалить запись');
+      deleteButton.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg>';
+      card.append(date, task, answer, deleteButton);
+      elements.historyList.append(card);
     });
-    card.appendChild(btn);
-    card.appendChild(steps);
   }
 
-  function resetAll() {
-    if (busy || solving) return;
-    solutions = []; reviewIdx = 0;
-    clearPhotos();
-    $('solution-task').textContent = ''; $('solution-steps').textContent = '';
-    setState('IDLE');
-    showScreen('home');
+  function deleteHistoryItem(id) {
+    const next = getHistory().filter((item) => item.id !== id);
+    localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(next));
+    renderHistory();
   }
 
-  render();
-  setState('IDLE');
+  async function clearCachesAndServiceWorkers() {
+    if ('caches' in window) {
+      const names = await caches.keys();
+      await Promise.all(names.map((name) => caches.delete(name)));
+    }
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+  }
 
-  window.studyAI = {
-    showScreen: showScreen,
-    toast: toast,
-    getPhotos: function () { return photos.map(function (p) { return { id: p.id, blob: p.blob }; }); },
-    getOcrResults: getOcrResults,
-    latexify: latexify,
-    getSolutions: function () { return solutions.slice(); },
-    reset: resetAll
-  };
-  var initial = location.hash.slice(1);
-  showScreen(SCREENS[initial] ? initial : 'home');
+  async function resetData() {
+    const confirmed = window.confirm('Удалить всю историю и настройки?');
+    if (!confirmed) return;
+    localStorage.clear();
+    try {
+      await clearCachesAndServiceWorkers();
+    } finally {
+      window.location.reload();
+    }
+  }
+
+  async function solveAndShow(text) {
+    const source = String(text || '').trim();
+    if (!source) {
+      showToast('Введите задачу.');
+      return;
+    }
+    if (!window.nerdamer) {
+      setStatus('Загружаю математический модуль…', true);
+      try {
+        await ensureNerdamer();
+      } catch {
+        showToast('Не удалось загрузить математический модуль.');
+        return;
+      }
+    }
+    const result = solveOne(source);
+    renderSolution(source, result);
+    if (result.status === 'ok') saveHistory(source, result);
+    navigate('solution');
+  }
+
+  async function applyCropAndRecognize() {
+    const button = $('#btn-crop-apply');
+    if (!button || !state.items.length) return;
+    button.disabled = true;
+    try {
+      setProgress(1, 'Подготавливаю изображение…');
+      const item = state.items[state.cropIndex];
+      const blob = await cropCurrentImage();
+      setProgress(10, 'Запускаю OCR…');
+      const recognized = await recognizeBlob(blob);
+      item.text = recognized.text;
+      item.confidence = recognized.confidence;
+      if (state.cropIndex < state.items.length - 1) {
+        state.cropIndex += 1;
+        setProgress((state.cropIndex / state.items.length) * 100, `Фото ${state.cropIndex + 1} из ${state.items.length}`);
+        showCropScreen(state.cropIndex);
+      } else {
+        setProgress(100);
+        state.ocrIndex = 0;
+        renderOcrReview();
+        navigate('ocr-review');
+      }
+    } catch (error) {
+      showToast(error.message || 'Не удалось распознать изображение.');
+      setStatus('', false);
+    } finally {
+      button.disabled = false;
+      setTimeout(() => setProgress(0), 400);
+    }
+  }
+
+  function renderOcrReview() {
+    const item = state.items[state.ocrIndex];
+    if (!item) return;
+    elements.ocrPager.hidden = state.items.length < 2;
+    elements.ocrPageLabel.textContent = `Фото ${state.ocrIndex + 1} из ${state.items.length}`;
+    elements.ocrPrevious.disabled = state.ocrIndex <= 0;
+    elements.ocrNext.disabled = state.ocrIndex >= state.items.length - 1;
+    elements.ocrPhoto.replaceChildren();
+    if (item.cropDataUrl) {
+      const image = document.createElement('img');
+      image.src = item.cropDataUrl;
+      image.alt = `Обрезанное фото ${state.ocrIndex + 1}`;
+      elements.ocrPhoto.append(image);
+    }
+    elements.ocrText.disabled = false;
+    elements.ocrText.value = item.text || '';
+    elements.ocrConfidence.textContent = item.confidence == null
+      ? ''
+      : `Уверенность распознавания: ${Math.round(item.confidence)}%`;
+    elements.ocrWarning.hidden = Boolean(item.text);
+    elements.ocrWarning.textContent = item.text ? '' : 'Текст не распознан. Введите его вручную перед решением.';
+  }
+
+  async function handleFiles(files) {
+    const selected = Array.from(files || []).filter((file) => file.type.startsWith('image/')).slice(0, 20);
+    if (!selected.length) {
+      showToast('Выберите изображение.');
+      return;
+    }
+    createWorkflowItems(selected);
+    showCropScreen(0);
+  }
+
+  function bindEvents() {
+    $$('[data-nav]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.nav)));
+    $('#btn-manual-toggle')?.addEventListener('click', toggleManualInput);
+    $('#btn-show-math')?.addEventListener('click', showKeyboard);
+    $('#btn-hide-math')?.addEventListener('click', hideKeyboard);
+    $$('.key').forEach((key) => key.addEventListener('click', () => insertAtCursor(key.dataset.key || '')));
+    $('#btn-solve-manual')?.addEventListener('click', () => solveAndShow(elements.mathInput.value));
+    $('#btn-camera')?.addEventListener('click', () => openFilePicker('input-camera'));
+    $('#btn-upload')?.addEventListener('click', () => openFilePicker('input-upload'));
+    $('#input-camera')?.addEventListener('change', (event) => handleFiles(event.target.files));
+    $('#input-upload')?.addEventListener('change', (event) => handleFiles(event.target.files));
+    elements.cropBox?.addEventListener('pointerdown', beginCropPointer);
+    elements.cropBox?.addEventListener('pointermove', moveCropPointer);
+    elements.cropBox?.addEventListener('pointerup', endCropPointer);
+    elements.cropBox?.addEventListener('pointercancel', endCropPointer);
+    $('#btn-crop-cancel')?.addEventListener('click', () => {
+      navigate('home');
+      state.items.forEach((item) => item.objectUrl && URL.revokeObjectURL(item.objectUrl));
+      state.items = [];
+    });
+    $('#btn-crop-apply')?.addEventListener('click', applyCropAndRecognize);
+    $('#btn-ocr-back')?.addEventListener('click', () => showCropScreen(state.cropIndex));
+    $('#btn-solve')?.addEventListener('click', () => {
+      state.items[state.ocrIndex].text = elements.ocrText.value;
+      const source = state.items.map((item) => item.text.trim()).filter(Boolean).join('\n');
+      solveAndShow(source);
+    });
+    elements.ocrPrevious?.addEventListener('click', () => {
+      if (state.ocrIndex <= 0) return;
+      state.items[state.ocrIndex].text = elements.ocrText.value;
+      state.ocrIndex -= 1;
+      renderOcrReview();
+    });
+    elements.ocrNext?.addEventListener('click', () => {
+      if (state.ocrIndex >= state.items.length - 1) return;
+      state.items[state.ocrIndex].text = elements.ocrText.value;
+      state.ocrIndex += 1;
+      renderOcrReview();
+    });
+    $('#btn-new-task')?.addEventListener('click', () => navigate('home'));
+    $('#btn-clear-history')?.addEventListener('click', () => {
+      if (!getHistory().length) return;
+      if (window.confirm('Очистить всю историю?')) {
+        localStorage.removeItem(STORAGE_KEYS.history);
+        renderHistory();
+      }
+    });
+    elements.historyList?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-history-id]');
+      if (button) deleteHistoryItem(button.dataset.historyId);
+    });
+    elements.themeSelect?.addEventListener('change', (event) => applyTheme(event.target.value));
+    $('#btn-reset-data')?.addEventListener('click', resetData);
+    window.addEventListener('beforeunload', () => {
+      state.items.forEach((item) => item.objectUrl && URL.revokeObjectURL(item.objectUrl));
+      state.tesseractWorker?.terminate?.();
+    });
+  }
+
+  function init() {
+    cacheElements();
+    applyTheme(getSavedTheme(), false);
+    elements.keyboard.setAttribute('aria-hidden', 'true');
+    elements.ocrText.disabled = false;
+    navigate('home');
+    bindEvents();
+    renderHistory();
+    ensureNerdamer().catch(() => setStatus('Математический модуль будет повторно загружен при решении.', true));
+  }
+
+  window.solveOne = solveOne;
+  window.latexify = latexify;
+  window.StudyAI = Object.freeze({ navigate, solveOne, latexify, renderHistory });
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
 })();
