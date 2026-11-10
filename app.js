@@ -932,7 +932,8 @@
     if (!str) return '';
     var s = String(str);
     s = s.replace(/(\d)\*([a-zA-Z])/g, '$1$2'); // 20*x -> 20x
-    s = s.replace(/\*/g, ' \\cdot ');           // остальные * -> ·
+    s = s.replace(/·/g, ' \\cdot ');            // <--- ИСПРАВЛЕНО: точку меняем на \cdot
+    s = s.replace(/\*/g, ' \\cdot ');           // обычные * -> \cdot
     s = s.replace(/sqrt\(([^()]*)\)/g, '\\sqrt{$1}'); // sqrt(5) -> √5
     s = s.replace(/\bpi\b/g, '\\pi');           // pi -> π
     s = s.replace(/\blog\(/g, '\\ln(');         // log -> ln
@@ -955,8 +956,8 @@
         box.appendChild(el('div', 'answer-label', 'Ответ'));
         var ansEl = el('div', 'answer');
         
-        // Если в ответе есть русские буквы (например "Действительных решений нет"), пишем текстом
-        if (/[а-яА-Я]/.test(s.answer)) {
+        // Если в ответе есть русские буквы или KaTeX не загрузился, пишем текстом
+        if (/[а-яА-Я]/.test(s.answer) || typeof katex === 'undefined') {
           ansEl.textContent = s.answer;
         } else {
           try {
