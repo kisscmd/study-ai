@@ -33,9 +33,6 @@
   function cacheElements() {
     elements.html = document.documentElement;
     elements.content = $('#content');
-    elements.manualArea = $('#manual-area');
-    elements.mathInput = $('#math-input');
-    elements.keyboard = $('#math-keyboard');
     elements.cropContainer = $('#crop-container');
     elements.cropImage = $('#crop-image');
     elements.cropBox = $('#crop-box');
@@ -141,34 +138,6 @@
     else elements.html.setAttribute('data-theme', theme);
     if (elements.themeSelect) elements.themeSelect.value = theme;
     if (persist) localStorage.setItem(STORAGE_KEYS.theme, theme);
-  }
-
-  function toggleManualInput() {
-    const shouldShow = !elements.manualArea.classList.contains('show');
-    elements.manualArea.classList.toggle('show', shouldShow);
-    if (shouldShow) {
-      elements.mathInput.focus();
-      elements.manualArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }
-
-  function insertAtCursor(text) {
-    const input = elements.mathInput;
-    const start = Number.isInteger(input.selectionStart) ? input.selectionStart : input.value.length;
-    const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
-    input.setRangeText(text, start, end, 'end');
-    input.focus();
-  }
-
-  function showKeyboard() {
-    elements.keyboard.classList.add('show');
-    elements.keyboard.setAttribute('aria-hidden', 'false');
-  }
-
-  function hideKeyboard() {
-    elements.keyboard.classList.remove('show');
-    elements.keyboard.setAttribute('aria-hidden', 'true');
-    elements.mathInput.focus();
   }
 
   function resetCropBox() {
@@ -872,11 +841,6 @@
 
   function bindEvents() {
     $$('[data-nav]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.nav)));
-    $('#btn-manual-toggle')?.addEventListener('click', toggleManualInput);
-    $('#btn-show-math')?.addEventListener('click', showKeyboard);
-    $('#btn-hide-math')?.addEventListener('click', hideKeyboard);
-    $$('.key').forEach((key) => key.addEventListener('click', () => insertAtCursor(key.dataset.key || '')));
-    $('#btn-solve-manual')?.addEventListener('click', () => solveAndShow(elements.mathInput.value));
     $('#btn-camera')?.addEventListener('click', () => openFilePicker('input-camera'));
     $('#btn-upload')?.addEventListener('click', () => openFilePicker('input-upload'));
     $('#input-camera')?.addEventListener('change', (event) => handleFiles(event.target.files));
@@ -932,7 +896,6 @@
   function init() {
     cacheElements();
     applyTheme(getSavedTheme(), false);
-    elements.keyboard.setAttribute('aria-hidden', 'true');
     elements.ocrText.disabled = false;
     navigate('home');
     bindEvents();
