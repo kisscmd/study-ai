@@ -1,4 +1,4 @@
-const CACHE_NAME = 'study-ai-v34'; // <--- Вот тут версия обновилась
+const CACHE_NAME = 'study-ai-v40'; // <--- Вот тут версия обновилась
 const ASSETS = [
   './',
   './index.html',
