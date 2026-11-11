@@ -709,8 +709,8 @@
     n = String(n);
 
     // OCR: корень иногда распознается как «,/102» или «/102».
-    // Меняем только slash в начале токена или после оператора, чтобы обычные дроби не ломались.
-    n = n.replace(/(^|[\s(=+\-*])[,']?\s*\/\s*(\([^()\n]*\)|[A-Za-z0-9.]+(?:\^[0-9]+)?)/g, function (m, pre, value) {
+    // Не трогаем обычное деление: перед slash допускается только начало строки или запятая.
+    n = n.replace(/(^|,\s*)[,']?\s*\/\s*(\([^()\n]*\)|[A-Za-z0-9.]+(?:\^[0-9]+)?)/g, function (m, pre, value) {
       return pre + 'sqrt(' + value + ')';
     });
 
@@ -1002,9 +1002,12 @@
       } catch (e6) { /* не тождество */ }
       return { answer: 'Действительных решений нет', kind: 'Уравнение' };
     }
-    var bad = false;
+    var bad = false, parameterized = false;
     var out = items.map(function (it) {
-      if (!isComplex(it)) {
+      var foreignVars = varsOf(String(it)).filter(function (name) { return name !== v; });
+      if (foreignVars.length) {
+        parameterized = true;
+      } else if (!isComplex(it)) {
         try {
           var chk = nerdamer('(' + lhs + ')-(' + rhs + ')', (function () { var o = {}; o[v] = it; return o; })()).evaluate().text('decimals');
           var v2 = Number(chk); if (!isFinite(v2) || Math.abs(v2) > 1e-6) bad = true;
@@ -1013,7 +1016,7 @@
       var d = isComplex(it) ? null : dec(it);
       return v + ' = ' + pretty(it) + (d && d !== it ? ' ≈ ' + d : '');
     });
-    return { answer: out.join('; '), kind: 'Уравнение', note: bad ? 'Проверка подстановкой не сошлась — проверьте условие.' : 'Проверено подстановкой.' };
+    return { answer: out.join('; '), kind: 'Уравнение', note: parameterized ? '' : (bad ? 'Проверка подстановкой не сошлась — проверьте условие.' : 'Проверено подстановкой.') };
   }
 
   function solveSystem(lines) {
@@ -1976,6 +1979,29 @@
     ];
   }
 
+  function fractionEquationSteps(lhs, rhs, v, fa) {
+    var leftFraction = topLevelDivision(lhs), rightFraction = topLevelDivision(rhs);
+    var fraction = leftFraction || rightFraction;
+    if (!fraction) return null;
+    var denominator = numericValue(fraction.denominator);
+    if (denominator === null || Math.abs(denominator) < 1e-12) return null;
+    var baseSteps = linearSteps(lhs, rhs, v, fa);
+    if (!baseSteps) return null;
+
+    var d = numericAnswer(denominator);
+    var numerator = stripOuterParens(fraction.numerator);
+    var leftText = leftFraction ? numerator : String(lhs).trim();
+    var rightValue = numericValue(rhs);
+    var rightText = rightFraction
+      ? stripOuterParens(rightFraction.numerator)
+      : String(rhs).trim() + ' · ' + d + (rightValue === null ? '' : ' = ' + numericAnswer(rightValue * denominator));
+    var steps = ['1. Умножим обе части уравнения на ' + d + ': ' + leftText + ' = ' + rightText];
+    baseSteps.forEach(function (step, index) {
+      steps.push((index + 2) + '. ' + String(step).replace(/^\d+\.\s*/, ''));
+    });
+    return steps;
+  }
+
   function generateSteps(taskText, finalAnswer) {
     try {
       var text = String(taskText), ch = parseChoices(text), base = ch ? ch.stem : text;
@@ -1991,7 +2017,12 @@
           if (parts.length === 2 && parts[1].trim()) {
             var v = detectVar(e);
             if (v) {
-              if (/\b(?:sin|cos|tan|tg|cot)\s*\(/i.test(e)) {
+              var parameterVars = varsOf(e).filter(function (name) { return name !== v; });
+              if (parameterVars.length) {
+                steps = ['1. Это уравнение с параметром. Выразим ' + v + ' через ' + parameterVars.join(', ') + '.'];
+              } else if (/\//.test(e)) {
+                steps = fractionEquationSteps(parts[0], parts[1], v, finalAnswer);
+              } else if (/\b(?:sin|cos|tan|tg|cot)\s*\(/i.test(e)) {
                 steps = trigSteps(e, finalAnswer);
               } else if (/log\(/.test(e)) {
                 steps = logSteps(parts[0], parts[1], v, finalAnswer);
