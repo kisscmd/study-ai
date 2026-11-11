@@ -23,6 +23,8 @@
       }
     });
     document.getElementById('content').scrollTop = 0;
+    if (name === 'history') renderHistory();
+    if (name === 'settings') syncSettings();
     try {
       if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
     } catch (e) { /* песочница (about:srcdoc) запрещает replaceState — хеш не обязателен */ }
@@ -1078,6 +1080,7 @@
     solving = false;
     setState('SOLUTION_SHOWN');
     renderSolutions();
+    saveSolutionsToHistory();
     renderReview();
   }
 
@@ -1622,6 +1625,184 @@
     showScreen('home');
   }
 
+  /* ================= E6: История и настройки ================= */
+  var HISTORY_KEY = 'studyai.history', THEME_KEY = 'studyai.theme', HISTORY_MAX = 50;
+
+  /*E6-LOGIC-START*/
+  function loadHistory() {
+    try {
+      var a = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      return Array.isArray(a) ? a.filter(function (h) { return h && typeof h.task === 'string'; }) : [];
+    } catch (e) { return []; }
+  }
+
+  function saveHistory(list) {   // максимум 50 записей, новые сверху
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX))); return true; }
+    catch (e) { console.error('История не сохранена:', e); return false; }
+  }
+
+  function newId() { return 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  // Формат записи: { id, task, answer, steps, date }
+  function saveSolutionsToHistory() {
+    var ok = solutions.filter(function (s) { return s.status === 'ok'; });
+    if (!ok.length) return;
+    var list = loadHistory();
+    ok.slice().reverse().forEach(function (s) {   // первая задача окажется сверху
+      var steps = [];
+      try { steps = generateSteps(s.text, s.answer); } catch (e) { steps = []; }
+      list = list.filter(function (h) { return !(h.task === s.text && h.answer === s.answer); });   // повторное решение обновляет запись
+      list.unshift({ id: newId(), task: s.text, answer: s.answer, steps: steps, date: new Date().toISOString() });
+    });
+    saveHistory(list);
+    if (current === 'history') renderHistory();
+  }
+
+  function removeFromHistory(id) {
+    saveHistory(loadHistory().filter(function (h) { return h.id !== id; }));
+    renderHistory();
+  }
+
+  function loadTheme() {
+    try { var t = localStorage.getItem(THEME_KEY); return (t === 'light' || t === 'dark') ? t : 'system'; }
+    catch (e) { return 'system'; }
+  }
+
+  // theme: 'system' | 'light' | 'dark' → атрибут data-theme на <html> + сохранение выбора
+  function applyTheme(theme) {
+    if (theme !== 'light' && theme !== 'dark') theme = 'system';
+    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.style.colorScheme = theme === 'system' ? '' : theme;
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* хранилище недоступно */ }
+    var sel = document.getElementById('theme-select');
+    if (sel && sel.value !== theme) sel.value = theme;
+  }
+  /*E6-LOGIC-END*/
+
+  function fmtDate(iso) {
+    try { return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return String(iso || ''); }
+  }
+
+  function renderHistory() {
+    var box = document.getElementById('history-list');
+    if (!box) return;
+    var list = loadHistory();
+    box.textContent = '';
+    if (!list.length) { box.appendChild(el('p', 'status', 'История пока пуста')); return; }
+    list.forEach(function (h) {
+      var card = el('div', 'card prob');
+      card.appendChild(el('div', 'prob-meta', fmtDate(h.date)));
+      card.appendChild(el('div', 'prob-task', h.task));
+      var ab = el('div', 'answer-box');
+      ab.appendChild(el('div', 'answer-label', 'Ответ'));
+      var ans = el('div', 'answer', prettyText(String(h.answer || '')));
+      ans.dataset.answer = String(h.answer || '');   // KaTeX дорисует формулу
+      ab.appendChild(ans);
+      card.appendChild(ab);
+      if (Array.isArray(h.steps) && h.steps.length) {
+        var det = document.createElement('details');
+        var sum = document.createElement('summary');
+        sum.textContent = 'Шаги решения';
+        sum.style.cssText = 'padding:12px 0;cursor:pointer';
+        var st = el('div', 'answer-steps');
+        h.steps.forEach(function (l) { st.appendChild(el('div', 'step', l)); });
+        det.appendChild(sum);
+        det.appendChild(st);
+        card.appendChild(det);
+      }
+      var del = el('button', 'btn btn-ghost', 'Удалить');
+      del.type = 'button';
+      del.setAttribute('aria-label', 'Удалить запись из истории');
+      del.addEventListener('click', function () { removeFromHistory(h.id); });
+      card.appendChild(del);
+      box.appendChild(card);
+    });
+    if (!typesetAnswers()) waitForKatex();
+  }
+
+  function syncSettings() {
+    var sel = document.getElementById('theme-select');
+    if (sel) sel.value = loadTheme();
+  }
+
+  // Токены тем для data-theme (в CSS их нет; «system» работает через prefers-color-scheme)
+  function injectThemeCss() {
+    if (document.getElementById('theme-css')) return;
+    var st = document.createElement('style');
+    st.id = 'theme-css';
+    st.textContent = ':root[data-theme="light"]{--bg:#FAFAF9;--primary:#18181B;--surface:#FFFFFF;--border:#E4E4E7;--muted:#52525B}' +
+                     ':root[data-theme="dark"]{--bg:#0A0A0A;--primary:#FAFAFA;--surface:#18181B;--border:#27272A;--muted:#A1A1AA}';
+    document.head.appendChild(st);
+  }
+
+  // Экраны «История» и «Настройки»: берём элементы из вёрстки, а если их там нет — создаём сами
+  function screenOf(node, id, title) {
+    var sec = node && node.closest ? node.closest('.screen') : null;
+    if (!sec) sec = document.getElementById(id);
+    if (!sec) {
+      sec = document.createElement('section');
+      sec.className = 'screen';
+      sec.id = id;
+      sec.setAttribute('aria-labelledby', id + '-title');
+      var h = document.createElement('h1');
+      h.id = id + '-title';
+      h.textContent = title;
+      sec.appendChild(h);
+      document.getElementById('content').appendChild(sec);
+    }
+    if (!sec.id) sec.id = id;
+    return sec;
+  }
+
+  function initE6() {
+    var hl = document.getElementById('history-list'), hs = screenOf(hl, 'screen-history', 'История');
+    if (!hl) { hl = document.createElement('div'); hl.id = 'history-list'; hl.className = 'stack'; }
+    if (!hl.closest('.screen')) hs.appendChild(hl);
+    SCREENS.history = hs.id;
+
+    var ts = document.getElementById('theme-select'), rb = document.getElementById('btn-reset-data');
+    var ss = screenOf(ts || rb, 'screen-settings', 'Настройки');
+    var wrap = ss.querySelector('.stack');
+    if (!wrap && (!ts || !rb)) { wrap = document.createElement('div'); wrap.className = 'stack'; ss.appendChild(wrap); }
+    if (!ts) {
+      var card = document.createElement('div'), lab = document.createElement('label');
+      card.className = 'card';
+      lab.htmlFor = 'theme-select'; lab.className = 'answer-label'; lab.textContent = 'Тема оформления';
+      lab.style.cssText = 'display:block;margin-bottom:8px';
+      ts = document.createElement('select');
+      ts.id = 'theme-select';
+      ts.style.cssText = 'width:100%;min-height:48px;padding:0 12px;font-size:16px;color:var(--primary);background:var(--surface);border:1px solid var(--border);border-radius:8px';
+      card.appendChild(lab); card.appendChild(ts);
+      wrap.appendChild(card);
+    }
+    if (!ts.options.length) {
+      [['system', 'Как в системе'], ['light', 'Светлая'], ['dark', 'Тёмная']].forEach(function (o) {
+        var opt = document.createElement('option');
+        opt.value = o[0]; opt.textContent = o[1];
+        ts.appendChild(opt);
+      });
+    }
+    if (!rb) {
+      rb = document.createElement('button');
+      rb.id = 'btn-reset-data'; rb.type = 'button'; rb.className = 'btn btn-secondary btn-block';
+      rb.textContent = 'Сбросить данные';
+      wrap.appendChild(rb);
+    }
+    SCREENS.settings = ss.id;
+
+    ts.addEventListener('change', function () { applyTheme(ts.value); });
+    rb.addEventListener('click', function () {
+      if (!window.confirm('Удалить историю и настройки? Это действие нельзя отменить.')) return;
+      try { localStorage.clear(); } catch (e) { /* ничего не делаем */ }
+      location.reload();
+    });
+
+    injectThemeCss();
+    applyTheme(loadTheme());
+  }
+  initE6();
+
   render();
   setState('IDLE');
 
@@ -1633,6 +1814,8 @@
     getOcrResults: getOcrResults,
     latexify: latexify,
     getSolutions: function () { return solutions.slice(); },
+    renderHistory: renderHistory,
+    applyTheme: applyTheme,
     reset: resetAll
   };
   var initial = location.hash.slice(1);
