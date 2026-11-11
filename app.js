@@ -239,6 +239,7 @@
     if (!drag) return;
     var d = drag; drag = null;
 
+
     clearMarks();
     d.tile.classList.remove('dragging');
     d.tile.style.transform = '';
@@ -478,6 +479,7 @@
         workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
         corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
         langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+
         logger: function (m) { if (ocrLogger) ocrLogger(m); }
 
       });
@@ -542,11 +544,102 @@
     showScreen('ocr-review');
   }
 
+
+  var mathKeyboardButton = null, mathKeyboardOverlay = null;
+  var mathKeyboardTarget = null, mathKeyboardStart = 0, mathKeyboardEnd = 0;
+
+  function closeMathKeyboard() {
+    if (mathKeyboardOverlay) mathKeyboardOverlay.style.display = 'none';
+    mathKeyboardTarget = null;
+  }
+
+  function markKeyboardEdit(ta) {
+    var p = photos[reviewIdx];
+    if (!p || !p.ocr) return;
+    p.ocr.text = ta.value;
+    p.ocr.edited = true;
+    $('btn-solve').disabled = !photos.some(function (ph) { return ph.ocr && ph.ocr.text.trim(); });
+  }
+
+  function ensureMathKeyboard(ta) {
+    if (!ta) return null;
+
+    if (!mathKeyboardButton) {
+      mathKeyboardButton = document.createElement('button');
+      mathKeyboardButton.type = 'button';
+      mathKeyboardButton.id = 'studyai-math-keyboard-button';
+      mathKeyboardButton.textContent = '⌨️';
+      mathKeyboardButton.setAttribute('aria-label', 'Открыть математическую клавиатуру');
+      mathKeyboardButton.title = 'Математическая клавиатура';
+      mathKeyboardButton.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;margin:8px 0 0 8px;min-width:44px;min-height:44px;padding:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--primary);font-size:20px;cursor:pointer;touch-action:manipulation;';
+      mathKeyboardButton.addEventListener('click', function () {
+        if (mathKeyboardButton.disabled) return;
+        mathKeyboardTarget = ta;
+        mathKeyboardStart = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
+        mathKeyboardEnd = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : mathKeyboardStart;
+        mathKeyboardOverlay.style.display = 'flex';
+      });
+      if (ta.parentNode) ta.parentNode.insertBefore(mathKeyboardButton, ta.nextSibling);
+    }
+
+    if (!mathKeyboardOverlay) {
+      mathKeyboardOverlay = document.createElement('div');
+      mathKeyboardOverlay.id = 'studyai-math-keyboard-overlay';
+      mathKeyboardOverlay.setAttribute('role', 'dialog');
+      mathKeyboardOverlay.setAttribute('aria-label', 'Математическая клавиатура');
+      mathKeyboardOverlay.style.cssText = 'display:none;position:fixed;top:0;right:0;bottom:0;left:0;z-index:10000;align-items:flex-end;justify-content:center;padding:16px;box-sizing:border-box;background:rgba(0,0,0,.42);';
+      mathKeyboardOverlay.addEventListener('click', function (e) {
+        if (e.target === mathKeyboardOverlay) closeMathKeyboard();
+      });
+
+      var panel = document.createElement('div');
+      panel.style.cssText = 'width:100%;max-width:420px;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--surface);box-shadow:0 10px 35px rgba(0,0,0,.28);display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;';
+      [
+        { label: 'x²', value: '^2' }, { label: 'x³', value: '^3' },
+        { label: '√', value: 'sqrt(' }, { label: 'π', value: 'pi' },
+        { label: 'log', value: 'log(' }, { label: 'sin', value: 'sin(' },
+        { label: 'cos', value: 'cos(' }, { label: 'tg', value: 'tg(' },
+        { label: '+', value: '+' }, { label: '-', value: '-' },
+        { label: '=', value: '=' }, { label: '(', value: '(' },
+        { label: ')', value: ')' }
+      ].forEach(function (item) {
+        var key = document.createElement('button');
+        key.type = 'button';
+        key.textContent = item.label;
+        key.setAttribute('aria-label', item.label);
+        key.style.cssText = 'min-height:48px;border:1px solid var(--border);border-radius:9px;background:var(--bg);color:var(--primary);font-size:18px;font-weight:600;cursor:pointer;touch-action:manipulation;';
+        key.addEventListener('click', function () {
+          var target = mathKeyboardTarget || ta;
+          if (!target || target.disabled) { closeMathKeyboard(); return; }
+          var start = typeof mathKeyboardStart === 'number' ? mathKeyboardStart : target.value.length;
+          var end = typeof mathKeyboardEnd === 'number' ? mathKeyboardEnd : start;
+          target.value = target.value.slice(0, start) + item.value + target.value.slice(end);
+          var caret = start + item.value.length;
+          target.focus();
+          if (typeof target.setSelectionRange === 'function') target.setSelectionRange(caret, caret);
+          markKeyboardEdit(target);
+          closeMathKeyboard();
+        });
+        panel.appendChild(key);
+      });
+      mathKeyboardOverlay.appendChild(panel);
+      document.body.appendChild(mathKeyboardOverlay);
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeMathKeyboard();
+      });
+    }
+
+    mathKeyboardButton.disabled = !!ta.disabled;
+    if (ta.disabled) closeMathKeyboard();
+    return mathKeyboardButton;
+  }
+
   function renderReview() {
     var n = photos.length;
     if (reviewIdx >= n) reviewIdx = Math.max(0, n - 1);
     var p = photos[reviewIdx];
     var ta = $('ocr-text'), frame = $('ocr-photo');
+    var mathKey = ensureMathKeyboard(ta);
     $('ocr-pager').hidden = n < 2;
     $('ocr-page-label').textContent = 'Фото ' + (reviewIdx + 1) + ' из ' + n;
     $('ocr-prev').disabled = reviewIdx <= 0;
@@ -574,6 +667,7 @@
       conf.textContent = p.ocr ? 'Уверенность распознавания: ' + Math.round(p.ocr.confidence * 100) + '%' : '';
     }
     var any = photos.some(function (ph) { return ph.ocr && ph.ocr.text.trim(); });
+    if (mathKey) mathKey.disabled = ta.disabled;
     $('btn-solve').disabled = !any;
   }
 
@@ -718,6 +812,7 @@
         lines.forEach(function (l) {
           if (num.test(l)) { if (cur) out.push(cur); cur = l.replace(num, ''); }
           else if (cur !== null) cur += ' ' + l;
+
         });
         if (cur) out.push(cur);
       } else {
@@ -775,6 +870,7 @@
     try {
       var n = Number(nerdamer(expr).evaluate().text('decimals'));
       if (!isFinite(n)) return null;
+      if (Math.abs(n - Math.round(n)) < 0.0001) return String(Math.round(n));
       return String(+n.toFixed(6));
     } catch (e) { return null; }
   }
@@ -836,15 +932,34 @@
     var e = preClean || cleanMath(normalize(raw));
     e = e.replace(/=\s*$/, '').trim();
     if (!e) throw new Error('empty');
+
+    if (e.indexOf('=') === -1) {
+      var logInfo = numericLogExpression(e);
+      if (logInfo) {
+        return { answer: numericAnswer(logInfo.result), kind: 'Вычисление', verified: true };
+      }
+      var trigInfo = numericTrigCall(e);
+      if (trigInfo) {
+        return { answer: numericAnswer(trigInfo.result), kind: 'Вычисление', verified: true };
+      }
+      var rootInfo = numericRootCall(e);
+      if (rootInfo) {
+        return { answer: numericAnswer(rootInfo.result), kind: 'Вычисление', verified: true };
+      }
+    }
+
     var v = detectVar(e);
     if (!v) {
       var s = nerdamer(e).evaluate().toString(), d = dec(e);
-      return { answer: pretty(s) + (d && d !== s ? ' ≈ ' + d : ''), kind: 'Вычисление', verified: true };
+      var rounded = d && /^-?\d+$/.test(d) ? d : null;
+      return { answer: rounded || (pretty(s) + (d && d !== s ? ' ≈ ' + d : '')), kind: 'Вычисление', verified: true };
     }
     var fn = /множител/i.test(raw) ? 'factor' : (/раскро|скобк/i.test(raw) ? 'expand' : 'simplify');
     var res = nerdamer(fn + '(' + e + ')').toString();
     var ok = sameValue(e, res, v);
-    return { answer: pretty(res), kind: 'Преобразование выражения', verified: ok, note: ok ? 'Проверено подстановкой.' : 'Не удалось проверить подстановкой.' };
+    var fractionMatch = /^\(([^()]*)\)\/(\d+(?:\.\d+)?|[A-Za-z])$/.exec(e);
+    var answer = fractionMatch ? fractionLatex(fractionMatch[1], fractionMatch[2]) : pretty(res);
+    return { answer: answer, kind: 'Преобразование выражения', verified: ok, note: ok ? 'Проверено подстановкой.' : 'Не удалось проверить подстановкой.' };
   }
 
   function solveChoice(ch) {   // тест с вариантами: ответ = вариант, совпавший по значениям с результатом
@@ -957,6 +1072,7 @@
   var KATEX_JS_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js';
   var KATEX_CSS_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css';
   var katexFallbackTried = false, katexWait = null, katexStyled = false;
+
 
   // Текст Nerdamer → LaTeX. «20·x» → «20x», остальные знаки умножения → \cdot
   function latexify(str) {
@@ -1198,6 +1314,7 @@
     var depth = 0, text = String(s);
     for (var i = 0; i < text.length; i++) {
       if (text[i] === '(') depth++;
+
       else if (text[i] === ')') depth--;
       else if (text[i] === '/' && depth === 0) {
         return { numerator: text.slice(0, i), denominator: text.slice(i + 1) };
@@ -1208,7 +1325,8 @@
 
   function answerExpressionAgrees(expr, finalAnswer, vars) {
     var a = String(finalAnswer || '').replace(/·/g, '*').replace(/π/g, 'pi')
-      .replace(/√\(/g, 'sqrt(').replace(/\bln\(/g, 'log(').trim();
+      .replace(/√\(/g, 'sqrt(').replace(/\bln\(/g, 'log(')
+      .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)').trim();
     if (a.indexOf('≈') > -1) a = a.split('≈')[0].trim();
     if (a.indexOf('=') > -1) a = a.slice(a.lastIndexOf('=') + 1).trim();
     if (!a || /[А-Яа-яЁё]/.test(a)) return false;
@@ -1438,6 +1556,7 @@
   }
 
   /* ---- многочлены от нескольких переменных (раскрытие скобок) ---- */
+
   function keyParse(k) { var m = {}; if (k) k.split('*').forEach(function (q) { var a = q.split('^'); m[a[0]] = +a[1]; }); return m; }
   function keyBuild(m) { return Object.keys(m).sort().map(function (v) { return v + '^' + m[v]; }).join('*'); }
   function pClean(p) { var r = {}; Object.keys(p).forEach(function (k) { if (Math.abs(p[k]) > 1e-12) r[k] = p[k]; }); return r; }
@@ -1678,6 +1797,7 @@
         return k === 0 ? (it.sign < 0 ? '-' : '') + body : (it.sign < 0 ? ' - ' : ' + ') + body;
       }).join('');
       var verb = items.length === 2 && items[0].sign > 0 ? (items[1].sign < 0 ? 'Вычтем' : 'Сложим') : 'Приведем подобные слагаемые';
+
       steps.push((steps.length + 1) + '. ' + verb + ': ' + asm + ' = ' + res);
     } else {
       steps.push((steps.length + 1) + '. Приведем подобные слагаемые и запишем итог: ' + res);
@@ -1713,6 +1833,147 @@
     return matchesAnswer([x0], fa) ? steps : null;
   }
 
+
+  /* ================= E8: Числовые вычисления без «=» ================= */
+
+  function numericValue(expr) {
+    try {
+      var n = Number(nerdamer(String(expr)).evaluate().text('decimals'));
+      return isFinite(n) ? n : null;
+    } catch (e) { return null; }
+  }
+
+  function numericAnswer(n) {
+    if (!isFinite(n)) return null;
+    if (Math.abs(n - Math.round(n)) < 0.0001) return String(Math.round(n));
+    return String(+n.toFixed(6));
+  }
+
+  function numericLogCall(expr) {
+    var m = /^log\((.*)\)$/i.exec(String(expr).replace(/\s+/g, ''));
+    if (!m) return null;
+    var args = splitTop(m[1]);
+    if (args.length !== 2) return null;
+    var base = numericValue(args[0]), value = numericValue(args[1]);
+    if (base === null || value === null || base <= 0 || base === 1 || value <= 0) return null;
+    var result = Math.log(value) / Math.log(base);
+    if (!isFinite(result) || Math.abs(Math.pow(base, result) - value) > 0.0001 * Math.max(1, Math.abs(value))) return null;
+    return { base: base, value: value, result: result, args: args };
+  }
+
+  function numericLogExpression(expr) {
+    var s = String(expr).replace(/\s+/g, '');
+    var terms = splitTopTerms(s), parts = [], i;
+    if (!terms || !terms.length) return null;
+    for (i = 0; i < terms.length; i++) {
+      var info = numericLogCall(terms[i].text);
+      if (!info || terms[i].sign < 0) return null;
+      parts.push(info);
+    }
+    if (!parts.length) return null;
+    for (i = 1; i < parts.length; i++) {
+      if (Math.abs(parts[i].base - parts[0].base) > 0.0001) return null;
+    }
+    var result = parts.reduce(function (sum, item) { return sum + item.result; }, 0);
+    return { parts: parts, base: parts[0].base, result: result };
+  }
+
+  function numericTrigCall(expr) {
+    var m = /^(sin|cos|tan|tg)\((.*)\)$/i.exec(String(expr).replace(/\s+/g, ''));
+    if (!m) return null;
+    var angle = numericValue(m[2]);
+    if (angle === null) return null;
+    var fn = m[1].toLowerCase(), result;
+    if (fn === 'sin') result = Math.sin(angle);
+    else if (fn === 'cos') result = Math.cos(angle);
+    else {
+      if (Math.abs(Math.cos(angle)) < 0.0001) return null;
+      result = Math.tan(angle);
+    }
+    if (Math.abs(result) < 0.0000001) result = 0;
+    return { fn: fn === 'tg' ? 'tg' : fn, angle: angle, arg: m[2], result: result };
+  }
+
+  function numericRootCall(expr) {
+    var m = /^sqrt\((.*)\)$/i.exec(String(expr).replace(/\s+/g, ''));
+    if (!m) return null;
+    var radicand = numericValue(m[1]);
+    if (radicand === null || radicand < 0) return null;
+    var result = Math.sqrt(radicand);
+    if (Math.abs(result - Math.round(result)) > 0.0001) return null;
+    return { radicand: radicand, result: result };
+  }
+
+  function numericFinalValueMatches(value, finalAnswer) {
+    var nums = String(finalAnswer || '').match(/-?(?:\d+(?:\.\d+)?|\.\d+)/g) || [];
+    return nums.some(function (n) {
+      var target = Number(n);
+      return isFinite(target) && Math.abs(value - target) < 0.0001 * Math.max(1, Math.abs(value), Math.abs(target));
+    });
+  }
+
+  function numericTrigSteps(expr, finalAnswer) {
+    var info = numericTrigCall(expr);
+    if (!info || !numericFinalValueMatches(info.result, finalAnswer)) return null;
+    var table = [
+      { value: 0, label: '0', sin: '0', cos: '1' },
+      { value: Math.PI / 6, label: 'π/6', sin: '1/2', cos: '√3/2' },
+      { value: Math.PI / 4, label: 'π/4', sin: '√2/2', cos: '√2/2' },
+      { value: Math.PI / 3, label: 'π/3', sin: '√3/2', cos: '1/2' },
+      { value: Math.PI / 2, label: 'π/2', sin: '1', cos: '0' },
+      { value: Math.PI, label: 'π', sin: '0', cos: '-1' }
+    ];
+    var known = null;
+    table.some(function (row) {
+      if (Math.abs(info.angle - row.value) < 0.0001) { known = row; return true; }
+      return false;
+    });
+    var fn = info.fn === 'tg' ? 'tg' : info.fn;
+    var valueText = known
+      ? (fn === 'sin' ? known.sin : (fn === 'cos' ? known.cos : (Math.abs(Math.cos(info.angle)) < 0.0001 ? 'не определен' : numericAnswer(info.result))))
+      : numericAnswer(info.result);
+    var label = info.arg.replace(/\bpi\b/g, 'π');
+    return [
+      '1. Определим аргумент: ' + fn + '(' + label + ').',
+      known
+        ? '2. Используем таблицу значений: ' + fn + '(' + known.label + ') = ' + valueText + '.'
+        : '2. Вычислим значение тригонометрической функции.',
+      '3. Ответ: ' + fn + '(' + label + ') = ' + valueText
+    ];
+  }
+
+  function numericLogSteps(expr, finalAnswer) {
+    var info = numericLogExpression(expr);
+    if (!info || !numericFinalValueMatches(info.result, finalAnswer)) return null;
+    var first = info.parts[0], baseText = numericAnswer(info.base);
+    if (info.parts.length === 1) {
+      var valueText = numericAnswer(first.value);
+      var resultText = numericAnswer(info.result);
+      return [
+        '1. Используем определение логарифма: log_' + baseText + '(' + valueText + ') = y ⇔ ' + baseText + '^y = ' + valueText + '.',
+        '2. Проверяем степень: ' + baseText + '^' + resultText + ' = ' + valueText + '.',
+        '3. Ответ: log_' + baseText + '(' + valueText + ') = ' + resultText
+      ];
+    }
+    var product = info.parts.reduce(function (p, item) { return p * item.value; }, 1);
+    var productText = numericAnswer(product);
+    return [
+      '1. Используем свойство логарифмов: log_a(b) + log_a(c) = log_a(b·c).',
+      '2. Объединяем сумму: ' + info.parts.map(function (item) { return 'log_' + baseText + '(' + numericAnswer(item.value) + ')'; }).join(' + ') + ' = log_' + baseText + '(' + productText + ').',
+      '3. Вычисляем: log_' + baseText + '(' + productText + ') = ' + numericAnswer(info.result)
+    ];
+  }
+
+  function numericRootSteps(expr, finalAnswer) {
+    var info = numericRootCall(expr);
+    if (!info || !numericFinalValueMatches(info.result, finalAnswer)) return null;
+    var root = numericAnswer(info.result), radicand = numericAnswer(info.radicand);
+    return [
+      '1. Представим подкоренное выражение как квадрат: ' + radicand + ' = ' + root + '^2.',
+      '2. Следовательно, √' + radicand + ' = ' + root + '.'
+    ];
+  }
+
   function generateSteps(taskText, finalAnswer) {
     try {
       var text = String(taskText), ch = parseChoices(text), base = ch ? ch.stem : text;
@@ -1741,7 +2002,10 @@
           } else if (parts.length === 2) e = parts[0];
         }
         if (!steps && e && e.indexOf('=') === -1) {
-          steps = arithSteps(e, finalAnswer) ||
+          steps = numericLogSteps(e, finalAnswer) ||
+                   numericTrigSteps(e, finalAnswer) ||
+                   numericRootSteps(e, finalAnswer) ||
+                   arithSteps(e, finalAnswer) ||
                    fractionSteps(e, finalAnswer) ||
                    nerdamerExpandSteps(e, finalAnswer) ||
                    expandSteps(e, finalAnswer) ||
@@ -1919,6 +2183,7 @@
     if (!hl.closest('.screen')) hs.appendChild(hl);
     SCREENS.history = hs.id;
 
+
     var ts = document.getElementById('theme-select'), rb = document.getElementById('btn-reset-data');
     var ss = screenOf(ts || rb, 'screen-settings', 'Настройки');
     var wrap = ss.querySelector('.stack');
@@ -1979,4 +2244,5 @@
   var initial = location.hash.slice(1);
   showScreen(SCREENS[initial] ? initial : 'home');
 })();
+
 
