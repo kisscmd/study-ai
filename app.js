@@ -238,6 +238,7 @@
     clearTimeout(holdTimer);
     if (!drag) return;
     var d = drag; drag = null;
+
     clearMarks();
     d.tile.classList.remove('dragging');
     d.tile.style.transform = '';
@@ -478,6 +479,7 @@
         corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
         langPath: 'https://tessdata.projectnaptha.com/4.0.0',
         logger: function (m) { if (ocrLogger) ocrLogger(m); }
+
       });
       
       try {
@@ -610,30 +612,51 @@
   }
 
   function cleanMath(n) {
-    // Tesseract теряет степень после скобки: «(x+5)2» → (x+5)^2. Метки списков «1) 2x…», «A) 3x…» не трогаем
-    n = n.replace(/\)\s*([23])(?![\d.])/g, function (m, d, off, str) {
+    n = String(n);
+
+    // OCR: корень иногда распознается как «,/102» или «/102».
+    // Меняем только slash в начале токена или после оператора, чтобы обычные дроби не ломались.
+    n = n.replace(/(^|[\s(=+\-*])[,']?\s*\/\s*(\([^()\n]*\)|[A-Za-z0-9.]+(?:\^[0-9]+)?)/g, function (m, pre, value) {
+      return pre + 'sqrt(' + value + ')';
+    });
+
+    // OCR теряет степень после скобки: «(x+5)2» и «(b+4)?» → «(x+5)^2».
+    n = n.replace(/\)\s*\?(?=\s*(?:[-+*/=),;]|$))/g, ')^2');
+    n = n.replace(/\)\s*([2-9])(?![\d.])/g, function (m, d, off, str) {
       var ls = str.lastIndexOf('\n', off) + 1;
       return /^\s*\S{1,2}$/.test(str.slice(ls, off)) ? m : ')^' + d;
     });
-    // Tesseract часто читает показатель степени как * или ?: «9q?» → 9q^2
+
+    // OCR часто читает показатель степени как «?» или «*»: «9q?» → «9q^2».
     n = n.replace(/(\d)([a-zA-Z])[?*](?=\s|$|[-+−—)\/])/g, '$1$2^2')
          .replace(/([\s(])([a-zA-Z])[?*](?=\s*[-+−—)\/=])/g, '$1$2^2');
+
+    // OCR путает латинскую b с кириллическими «Б» и связкой «Ъb».
+    n = n.replace(/Ъ\s*b/gi, 'b')
+         .replace(/[Бб]/g, 'b')
+         .replace(/(^|[^A-Za-z])Ъ(?=[\s+\-*\/^=()])/g, '$1b');
+
     var CYR = { 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x', 'у': 'y', 'к': 'k', 'м': 'm', 'т': 't', 'в': 'b', 'н': 'h', 'Х': 'x', 'У': 'y' };
-    // OCR читает цифру 3 как кириллическую «З»: «За + 5а» → «3а + 5а». Только отдельная З либо З + буква перед знаком/концом:
-    // слова вроде «значение», «Задание» не трогаем (иначе в выражении остаётся лишняя «3»)
+    // OCR читает цифру 3 как кириллическую «З».
     n = n.replace(/(^|[^А-Яа-яЁё])[зЗ](?=[^А-Яа-яЁё]|$)/g, function (m, pre) { return pre + '3'; })
          .replace(/(^|[^А-Яа-яЁё])[зЗ](?=[a-zA-Zаеорсхукмтвн]\s*(?:[-+*\/^=)]|$))/g, function (m, pre) { return pre + '3'; });
+
     var s = n.replace(/[А-Яа-яЁё]{2,}/g, ' ')
-      // кириллические «двойники» → латиница (3а+5а-2а → 3a+5a-2a); х/у — всегда, остальные — только вплотную к цифре, знаку или скобке
+      // кириллические «двойники» → латиница
       .replace(/[аеорсхукмтвнХУ]/g, function (ch, off, str) {
         if (ch === 'х' || ch === 'Х' || ch === 'у' || ch === 'У') return CYR[ch];
         var glued = /[\dA-Za-z+\-*\/^=()]/;
         return (glued.test(str[off - 1] || ' ') || glued.test(str[off + 1] || ' ')) ? CYR[ch] : ch;
       })
-      .replace(/[А-Яа-яЁё]/g, ' ').replace(/[?!№]+/g, ' ').replace(/\s+/g, ' ')
+      .replace(/[А-Яа-яЁё]/g, ' ')
+      .replace(/[?!№]+/g, ' ')
+      .replace(/\s+/g, ' ')
       .replace(/^[\s.,;:]+|[\s.,;:]+$/g, '').trim();
-    // …а если степень потеряна совсем: q2 → q^2 (если в тексте нет индексов вида x1)
-    if (!/(^|[^a-zA-Z])[a-zA-Z]1(?![\w.])/.test(s)) s = s.replace(/(^|[^a-zA-Z])([a-zA-Z])([23])(?![\w.(])/g, '$1$2^$3');
+
+    // Если степень потеряна совсем: q2 → q^2, но не индексы вида x1.
+    if (!/(^|[^a-zA-Z])[a-zA-Z]1(?![\w.])/.test(s)) {
+      s = s.replace(/(^|[^a-zA-Z])([a-zA-Z])([23])(?![\w.(])/g, '$1$2^$3');
+    }
     return s;
   }
 
@@ -718,6 +741,7 @@
       var c = s[i];
       if (c === '(' || c === '[') depth++;
       if (c === ')' || c === ']') depth--;
+
       if (c === ',' && depth === 0) { out.push(cur.trim()); cur = ''; } else cur += c;
     }
     if (cur.trim()) out.push(cur.trim());
@@ -959,6 +983,7 @@
     return s.replace(/\s+/g, ' ').trim();
   }
 
+
   // Запасной текстовый вид, если KaTeX недоступен: «20·x» → «20x»
   function prettyText(str) {
     return String(str).replace(/([A-Za-z0-9.)])\s*·\s*(?=[A-Za-z(])/g, '$1');
@@ -1150,6 +1175,121 @@
     return { A: A, B: B, C: c };
   }
 
+
+  function fractionLatex(num, den) {
+    return '\\frac{' + String(num).trim() + '}{' + String(den).trim() + '}';
+  }
+
+  function stripOuterParens(s) {
+    var t = String(s).trim(), changed = true;
+    while (changed && t.charAt(0) === '(' && t.charAt(t.length - 1) === ')') {
+      var depth = 0, ok = true;
+      for (var i = 0; i < t.length; i++) {
+        if (t[i] === '(') depth++;
+        else if (t[i] === ')') depth--;
+        if (depth === 0 && i < t.length - 1) { ok = false; break; }
+      }
+      if (ok) t = t.slice(1, -1).trim(); else changed = false;
+    }
+    return t;
+  }
+
+  function topLevelDivision(s) {
+    var depth = 0, text = String(s);
+    for (var i = 0; i < text.length; i++) {
+      if (text[i] === '(') depth++;
+      else if (text[i] === ')') depth--;
+      else if (text[i] === '/' && depth === 0) {
+        return { numerator: text.slice(0, i), denominator: text.slice(i + 1) };
+      }
+    }
+    return null;
+  }
+
+  function answerExpressionAgrees(expr, finalAnswer, vars) {
+    var a = String(finalAnswer || '').replace(/·/g, '*').replace(/π/g, 'pi')
+      .replace(/√\(/g, 'sqrt(').replace(/\bln\(/g, 'log(').trim();
+    if (a.indexOf('≈') > -1) a = a.split('≈')[0].trim();
+    if (a.indexOf('=') > -1) a = a.slice(a.lastIndexOf('=') + 1).trim();
+    if (!a || /[А-Яа-яЁё]/.test(a)) return false;
+    return sameMulti(expr, a, vars || []);
+  }
+
+  function formatStepExpr(expr) {
+    return latexify(pretty(String(expr)));
+  }
+
+  function fractionSteps(expr, fa) {
+    var s = String(expr).replace(/\s+/g, '').replace(/·/g, '*');
+    if (!s || s.indexOf('=') > -1) return null;
+    var d = topLevelDivision(s);
+    if (!d || !d.numerator || !d.denominator) return null;
+    var vars = varsOf(s), result;
+    try {
+      result = nerdamer('simplify(' + s + ')').toString();
+      if (!sameMulti(s, result, vars) || !answerExpressionAgrees(result, fa, vars)) return null;
+    } catch (e) {
+      return null;
+    }
+    var frac = fractionLatex(stripOuterParens(d.numerator), stripOuterParens(d.denominator));
+    var steps = ['1. Представим деление в виде дроби: ' + frac];
+    if (String(result) !== s) steps.push('2. Упростим дробь: ' + frac + ' = ' + formatStepExpr(result));
+    return steps;
+  }
+
+  function trigSteps(expr) {
+    var s = String(expr);
+    if (!/\b(?:sin|cos|tan|tg|cot)\s*\(/i.test(s)) return null;
+    return [
+      '1. Применим формулы приведения: sin(-x) = -sin(x), cos(-x) = cos(x), tg(-x) = -tg(x).',
+      '2. Используем основные тождества: sin^2(x) + cos^2(x) = 1, tg(x) = sin(x) / cos(x).'
+    ];
+  }
+
+  function nerdamerExpandedText(expr) {
+    var p = parsePoly(expr);
+    return p ? pToString(p) : pretty(String(expr));
+  }
+
+  function nerdamerExpandSteps(expr, fa) {
+    var s = String(expr).replace(/\s+/g, '').replace(/·/g, '*');
+    if (!/\([^()]+\)\^\d+/.test(s)) return null;
+
+    var vars = varsOf(s), expanded;
+    try {
+      expanded = nerdamer('expand(' + s + ')').toString();
+      if (!sameMulti(s, expanded, vars) || !answerExpressionAgrees(expanded, fa, vars)) return null;
+    } catch (e) {
+      return null;
+    }
+
+    var steps = [], match, found = false;
+    var re = /(\([^()]+\))\^(\d+)/g;
+    while ((match = re.exec(s))) {
+      var base = match[1], inner = base.slice(1, -1), power = Number(match[2]);
+      if (power < 3) continue;
+      found = true;
+      var repeated = [], k;
+      for (k = 0; k < power; k++) repeated.push(base);
+      steps.push((steps.length + 1) + '. Представим степень как произведение: ' + base + '^' + power + ' = ' + repeated.join('·'));
+
+      var squareRaw = nerdamer('expand(' + base + '^2)').toString();
+      var square = nerdamerExpandedText(squareRaw);
+      steps.push((steps.length + 1) + '. Раскроем квадрат: ' + base + '^2 = ' + square);
+
+      var previous = squareRaw;
+      for (k = 3; k <= power; k++) {
+        var currentRaw = nerdamer('expand((' + previous + ')*(' + inner + '))').toString();
+        var current = nerdamerExpandedText(currentRaw);
+        steps.push((steps.length + 1) + '. Умножим предыдущий результат на ' + base + ': (' + nerdamerExpandedText(previous) + ')·' + base + ' = ' + current);
+        previous = currentRaw;
+      }
+    }
+    if (!found) return null;
+    steps.push((steps.length + 1) + '. Приведем подобные слагаемые и запишем итог: ' + nerdamerExpandedText(expanded));
+    return steps;
+  }
+
   function linearSteps(lhs, rhs, v, fa) {
     var L = polyFit(function (o) { return evalN(lhs, o); }, v), R = polyFit(function (o) { return evalN(rhs, o); }, v);
     if (!L || !R || Math.abs(L.A) > 1e-9 || Math.abs(R.A) > 1e-9) return null;
@@ -1163,7 +1303,7 @@
     } else {                     // x есть в обеих частях
       steps.push('1. Перенесем слагаемые с ' + v + ' влево, числа вправо: (' + fmt(al) + ' - ' + signed(ar) + ')' + v + ' = ' + fmt(br) + ' - ' + signed(bl) + ', то есть ' + term(a, v) + ' = ' + fmt(c));
     }
-    if (Math.abs(a - 1) > 1e-9) steps.push((steps.length + 1) + '. Разделим обе части на ' + fmt(a) + ': ' + v + ' = ' + fmt(c) + ' / ' + fmt(a) + ' = ' + fmt(x));
+    if (Math.abs(a - 1) > 1e-9) steps.push((steps.length + 1) + '. Разделим обе части на ' + fmt(a) + ': ' + v + ' = ' + fractionLatex(fmt(c), fmt(a)) + ' = ' + fmt(x));
     if (!steps.length) return null;
     return matchesAnswer([x], fa) ? steps : null;
   }
@@ -1198,6 +1338,7 @@
     var vars = varsOf(lines.join(' '));
     if (vars.length !== 2) return null;
     var X = vars[0], Y = vars[1];
+
     var coef = function (q) {   // ax + by = k
       var g = function (x, y) { var o = {}; o[X] = x; o[Y] = y; return evalN(q[0], o) - evalN(q[1], o); };
       var g0 = g(0, 0), a = g(1, 0) - g0, b = g(0, 1) - g0, k = -g0;
@@ -1438,6 +1579,7 @@
     var out = [], i = 0, s = String(t).replace(/\s+/g, '').replace(/·/g, '*');
     while (i < s.length) {
       if (s[i] === '*') { i++; continue; }
+
       var start = i, inner = null;
       if (s[i] === '(') {
         var d = 0, j = i;
@@ -1560,12 +1702,13 @@
     var lin = term(a, v) + (Math.abs(b) > 1e-9 ? (b < 0 ? ' - ' + fmtD(-b) : ' + ' + fmtD(b)) : '');
     var numer = Math.abs(b) < 1e-9 ? vs : vs + (b < 0 ? ' + ' + fmtD(-b) : ' - ' + fmtD(b));
     var steps = [
-      '1. Используем определение логарифма: log_a(b) = c ⇒ a^c = b. Для ln основание a = e, поэтому ' + inner + ' = e^' + cs,
-      '2. Вычислим степень: e^' + cs + ' ≈ ' + vs,
+      '1. Используем определение логарифма: log_a(b) = c ⇒ a^c = b.',
+      '2. Переходим к показательному уравнению: ' + inner + ' = e^' + cs,
+      '3. Вычислим степень: e^' + cs + ' ≈ ' + vs,
       Math.abs(a - 1) < 1e-9 && Math.abs(b) < 1e-9
-        ? '3. Получаем: ' + v + ' = e^' + cs + ' ≈ ' + vs
-        : '3. Решим уравнение ' + lin + ' = ' + vs + ': ' + v + ' = ' + (Math.abs(a - 1) < 1e-9 ? numer : '(' + numer + ') / ' + signed(a)) + ' ≈ ' + String(+x0.toFixed(4)),
-      '4. Проверим ОДЗ: аргумент логарифма должен быть положительным: ' + inner + ' = ' + vs + ' > 0, условие выполнено'
+        ? '4. Получаем: ' + v + ' = e^' + cs + ' ≈ ' + vs
+        : '4. Решим уравнение ' + lin + ' = ' + vs + ': ' + v + ' = ' + (Math.abs(a - 1) < 1e-9 ? numer : fractionLatex(numer, signed(a))) + ' ≈ ' + String(+x0.toFixed(4)),
+      '5. Проверим ОДЗ: аргумент логарифма должен быть положительным: ' + inner + ' = ' + vs + ' > 0, условие выполнено'
     ];
     return matchesAnswer([x0], fa) ? steps : null;
   }
@@ -1585,16 +1728,30 @@
           if (parts.length === 2 && parts[1].trim()) {
             var v = detectVar(e);
             if (v) {
-              steps = /log\(/.test(e) ? logSteps(parts[0], parts[1], v, finalAnswer)
-                                      : (linearSteps(parts[0], parts[1], v, finalAnswer) || quadraticSteps(parts[0], parts[1], v, finalAnswer));
+              if (/\b(?:sin|cos|tan|tg|cot)\s*\(/i.test(e)) {
+                steps = trigSteps(e, finalAnswer);
+              } else if (/log\(/.test(e)) {
+                steps = logSteps(parts[0], parts[1], v, finalAnswer);
+              } else {
+                steps = linearSteps(parts[0], parts[1], v, finalAnswer) ||
+                         quadraticSteps(parts[0], parts[1], v, finalAnswer);
+              }
             }
             e = '';
           } else if (parts.length === 2) e = parts[0];
         }
-        if (!steps && e && e.indexOf('=') === -1) steps = arithSteps(e, finalAnswer) || expandSteps(e, finalAnswer) || groupSteps(e);
+        if (!steps && e && e.indexOf('=') === -1) {
+          steps = arithSteps(e, finalAnswer) ||
+                   fractionSteps(e, finalAnswer) ||
+                   nerdamerExpandSteps(e, finalAnswer) ||
+                   expandSteps(e, finalAnswer) ||
+                   groupSteps(e);
+        }
       }
       return steps || [];
-    } catch (err) { return []; }
+    } catch (err) {
+      return [];
+    }
   }
   /*E5-PURE-END*/
 
@@ -1606,7 +1763,7 @@
     btn.addEventListener('click', function () {
       var list = generateSteps(s.text, s.answer);
       steps.textContent = '';
-      (list.length ? list : ['Для этого типа задач пошаговый разбор пока не поддерживается.']).forEach(function (l) {
+      (list.length ? list : ['Для этого типа задач шагов нет']).forEach(function (l) {
         steps.appendChild(el('div', 'step', l));
       });
       steps.style.display = 'block';
@@ -1678,6 +1835,7 @@
     if (sel && sel.value !== theme) sel.value = theme;
   }
   /*E6-LOGIC-END*/
+
 
   function fmtDate(iso) {
     try { return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
@@ -1821,3 +1979,4 @@
   var initial = location.hash.slice(1);
   showScreen(SCREENS[initial] ? initial : 'home');
 })();
+
